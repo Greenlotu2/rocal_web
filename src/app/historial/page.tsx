@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { supabase } from '../../lib/supabase'; // Asegúrate de que la ruta sea correcta
+export const dynamic = 'force-dynamic';
 
 export default function HistorialObrasPage() {
   const router = useRouter();

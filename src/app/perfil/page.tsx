@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useUser } from '../context/UserContext'; 
+export const dynamic = 'force-dynamic';
 
 export default function PerfilUsuarioWeb() {
   const router = useRouter();

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { supabase } from '../../../lib/supabase'; // Ajusta la ruta si tu carpeta lib está en otro nivel
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
+export const dynamic = 'force-dynamic';
 
 export default function ReporteFinalObraPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: projectId } = use(params);

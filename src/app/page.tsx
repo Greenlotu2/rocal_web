@@ -6,9 +6,11 @@ import Link from 'next/link';
 import { supabase } from '../lib/supabase';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 import jsPDF from 'jspdf';
+export const dynamic = 'force-dynamic';
 import autoTable from 'jspdf-autotable';
 
 export default function DashboardPage() {
+  
   const router = useRouter();
   const [loadingAuth, setLoadingAuth] = useState(true);
   const [userRole, setUserRole] = useState<string | null>(null); 
