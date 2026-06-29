@@ -10,7 +10,18 @@ export const dynamic = 'force-dynamic';
 import autoTable from 'jspdf-autotable';
 
 export default function DashboardPage() {
-  
+  // --- ESTADOS ADICIONALES PARA FORMULARIOS MÓVILES HOMOLOGADOS ---
+  const [numNota, setNumNota] = useState('');
+  const [responsableGasto, setResponsableGasto] = useState('');
+  const [justificacionCaja, setJustificacionCaja] = useState('');
+  const [nombreEquipo, setNombreEquipo] = useState('');
+  const [modalidadFacturacion, setModalidadFacturacion] = useState('Por Semana');
+  const [tarifaHora, setTarifaHora] = useState('');
+  const [rubroClasificacion, setRubroClasificacion] = useState('Material');
+  const [estadoPago, setEstadoPago] = useState('Liquidado');
+  const [numCotizacion, setNumCotizacion] = useState('');
+const [encargadoRecibeDestajo, setEncargadoRecibeDestajo] = useState('');
+const [solicitadoPorDestajo, setSolicitadoPorDestajo] = useState('');
   const router = useRouter();
   const [loadingAuth, setLoadingAuth] = useState(true);
   const [userRole, setUserRole] = useState<string | null>(null); 
@@ -141,9 +152,10 @@ export default function DashboardPage() {
   }, [cantidadGasto, precioUnitarioGasto]);
 
   const fetchMetricsAndRecords = async (projectId: string) => {
+
     setLoadingMetrics(true);
     try {
-      const { data: gastos } = await supabase.from('gastos_generales').select('*').eq('project_id', projectId).eq('status', true).order('fecha', { ascending: false });
+      const { data: gastos } = await supabase.from('gastos_generales').select('*').eq('project_id', projectId).eq('is_active', true).order('fecha', { ascending: false });
       setGastosGeneralesRecords(gastos || []);
 
       const { data: workers } = await supabase.from('workers').select('*').eq('project_id', projectId).eq('status', true);
@@ -164,7 +176,7 @@ export default function DashboardPage() {
       const { data: planos } = await supabase.from('planos').select('*').eq('project_id', projectId).order('created_at', { ascending: false });
       setPlanosRecords(planos || []);
 
-      const { data: maquinaria } = await supabase.from('gastos_maquinaria').select('*').eq('project_id', projectId).eq('status', true).order('fecha', { ascending: false });
+      const { data: maquinaria } = await supabase.from('gastos_maquinaria').select('*').eq('project_id', projectId).order('fecha', { ascending: false });
       setMaquinariaRecords(maquinaria || []);
 
       setMetrics({
@@ -274,17 +286,101 @@ export default function DashboardPage() {
   const totalConsolidated = chartData.reduce((sum, item) => sum + item.value, 0);
   const COLORS = ['#F59E0B', '#3B82F6', '#10B981', '#8B5CF6'];
 
-  const handleSaveGasto = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedProject) return;
-    setLoadingExpenseForm(true); setExpenseFormError(null);
-    try {
-      const { error } = await supabase.from('gastos_generales').insert([{ project_id: selectedProject.id, concepto: conceptoGasto, unidad: unidadGasto || null, cantidad: cantidadGasto ? parseFloat(cantidadGasto) : null, precio_unitario: precioUnitarioGasto ? parseFloat(precioUnitarioGasto) : null, monto: parseFloat(montoGasto), tipo: tipoGasto, proveedor: proveedorGasto || null, fecha: fechaGasto, status: true }]);
-      if (error) throw error;
-      setConceptoGasto(''); setUnidadGasto(''); setCantidadGasto(''); setPrecioUnitarioGasto(''); setMontoGasto(''); setTipoGasto('Destajos y Materiales'); setProveedorGasto(''); setFechaGasto(new Date().toISOString().split('T')[0]); setIsExpenseModalOpen(false);
-      await fetchMetricsAndRecords(selectedProject.id);
-    } catch (error: any) { setExpenseFormError(error.message); } finally { setLoadingExpenseForm(false); }
-  };
+const handleSaveGasto = async (e: React.FormEvent) => {
+  e.preventDefault();
+  if (!selectedProject) return;
+  setLoadingExpenseForm(true); 
+  setExpenseFormError(null);
+
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    const userId = session?.user?.id || null;
+
+    let error: any = null;
+
+    switch (expenseSubTab) {
+      case 'generales': // Tabla: gastos_generales (Módulo Registro Estructural)
+        const payloadGenerales: any = {
+          project_id: selectedProject.id,
+          concepto: conceptoGasto,
+          unidad: unidadGasto || null,
+          cantidad: cantidadGasto ? parseFloat(cantidadGasto) : null,
+          precio_unitario: precioUnitarioGasto ? parseFloat(precioUnitarioGasto) : null,
+          monto: parseFloat(montoGasto),
+          tipo: tipoGasto,
+          proveedor: proveedorGasto || null,
+          fecha: fechaGasto,
+          status: true,
+          id_residente: userId // Evitamos el constraint de null anterior
+        };
+        
+        // Si tu tabla maneja los campos estructurales extras de la app (imagen d85bc2):
+        if (rubroClasificacion) payloadGenerales.clasificacion_rubro = rubroClasificacion;
+        if (estadoPago) payloadGenerales.estado_pago = estadoPago;
+        if (numCotizacion) payloadGenerales.numero_cotizacion = numCotizacion;
+
+        const resGen = await supabase.from('gastos_generales').insert([payloadGenerales]);
+        error = resGen.error;
+        break;
+
+      case 'caja_chica': // Tabla: caja_chica (Módulo Libro Mayor de Caja)
+        const resCaja = await supabase.from('caja_chica').insert([{
+          project_id: selectedProject.id,
+          fecha: fechaGasto,
+          encargado: responsableGasto || 'Oficina',
+          concepto: conceptoGasto, // Concepto del artículo comprado
+          monto: parseFloat(montoGasto),
+          justificacion: justificacionCaja || null,
+          numero_nota: numNota || null
+        }]);
+        error = resCaja.error;
+        break;
+
+      case 'maquinaria': // Tabla: gastos_maquinaria (Módulo Alta de Nuevo Equipo)
+        const resMaq = await supabase.from('gastos_maquinaria').insert([{
+          project_id: selectedProject.id,
+          equipo: nombreEquipo || conceptoGasto,
+          proveedor: proveedorGasto || null,
+          fecha: fechaGasto,
+          monto: parseFloat(montoGasto),
+          asistencia_dias: cantidadGasto ? parseFloat(cantidadGasto) : null, // Guarda las horas de uso
+          categoria: 'renta', // O 'anticipo' según tu lógica
+          status: true
+        }]);
+        error = resMaq.error;
+        break;
+
+      case 'destajos': // Tabla: inventory (Módulo Registro de Destajos)
+        const resInv = await supabase.from('inventory').insert([{
+          project_id: selectedProject.id,
+          name: conceptoGasto,                  // Concepto / Actividad
+          unidad: unidadGasto || null,               // Unidad (Ej. Bulto)
+          cantidad: cantidadGasto ? parseFloat(cantidadGasto) : 1, // Vol. / Cant.
+          unit_price: precioUnitarioGasto ? parseFloat(precioUnitarioGasto) : 0, // P.U / Mano de Obra
+          in_charge: encargadoRecibeDestajo || null, // Encargado / Recibe
+          requested_by: solicitadoPorDestajo || null,     // Solicitado por
+          created_at: new Date().toISOString()
+        }]);
+        error = resInv.error;
+        break;
+    }
+
+    if (error) throw error;
+
+    // Limpieza de campos comunes
+    setConceptoGasto(''); setUnidadGasto(''); setCantidadGasto(''); setPrecioUnitarioGasto(''); 
+    setMontoGasto(''); setProveedorGasto(''); setNumNota(''); setResponsableGasto(''); setJustificacionCaja('');
+    setNombreEquipo(''); setNumCotizacion('');
+    
+    setIsExpenseModalOpen(false);
+    await fetchMetricsAndRecords(selectedProject.id);
+
+  } catch (err: any) { 
+    setExpenseFormError(err.message); 
+  } finally { 
+    setLoadingExpenseForm(false); 
+  }
+};
 
   const handleCreateWorker = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -935,14 +1031,7 @@ const handleFinalizarObra = async () => {
                         >
                           🛠️ Destajos e Inventario
                         </button>
-                      </div>
-
-                      {/* CONTENIDO 1: GASTOS GENERALES Y MATERIALES */}
-                      {expenseSubTab === 'generales' && (
-                        <>
-                          <div className="px-8 py-4 border-b border-slate-100 flex justify-between items-center bg-white">
-                            <p className="text-sm text-slate-500">Registro detallado de salidas, compras y gastos directos.</p>
-                            <div className="flex gap-2 items-center">
+                        <div className="flex gap-2 items-center">
                               {(userRole === 'admin' || userRole === 'oficina') && (
                                 <button onClick={() => setIsExpenseModalOpen(true)} className="flex items-center gap-2 bg-blue-600 text-white hover:bg-blue-700 text-xs font-bold px-4 py-2 rounded-xl transition-colors shadow-sm">
                                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" /></svg>
@@ -950,6 +1039,14 @@ const handleFinalizarObra = async () => {
                                 </button>
                               )}
                             </div>
+                      </div>
+
+                      {/* CONTENIDO 1: GASTOS GENERALES Y MATERIALES */}
+                      {expenseSubTab === 'generales' && (
+                        <>
+                          <div className="px-8 py-4 border-b border-slate-100 flex justify-between items-center bg-white">
+                            <p className="text-sm text-slate-500">Registro detallado de salidas, compras y gastos directos.</p>
+          
                           </div>
 
                           <table className="w-full text-left text-sm">
@@ -1042,44 +1139,71 @@ const handleFinalizarObra = async () => {
                           </table>
                         </>
                       )}
-                      {/* CONTENIDO 4: DESTAJOS E INVENTARIO */}
-                      {expenseSubTab === 'destajos' && (
-                        <>
-                          <div className="px-8 py-4 border-b border-slate-100 flex justify-between items-center bg-white">
-                            <p className="text-sm text-slate-500">Registro de destajos, materiales en almacén y avances de obra.</p>
-                          </div>
-                          <table className="w-full text-left text-sm">
-                            <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
-                              <tr>
-                                <th className="px-6 py-4">Fecha</th>
-                                <th className="px-6 py-4">Concepto / Material</th>
-                                <th className="px-6 py-4 text-right">Cantidad</th>
-                                <th className="px-6 py-4 text-right">P. Unitario</th>
-                                <th className="px-6 py-4 text-right">Total Acumulado</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100 bg-white">
-                              {inventoryRecords.length === 0 ? (
-                                <tr><td colSpan={5} className="px-6 py-8 text-center text-slate-400">Aún no hay destajos o inventario registrado.</td></tr>
-                              ) : (
-                                inventoryRecords.map((r, idx) => {
-                                  const cantidad = Number(r.cantidad || r.quantity || r.stock || 0);
-                                  const precioUnitario = Number(r.unit_price || r.precio || 0);
-                                  return (
-                                    <tr key={r.id || idx} className="hover:bg-slate-50/80">
-                                      <td className="px-6 py-4 text-slate-600">{formatDate(r.created_at || r.fecha).split(',')[0]}</td>
-                                      <td className="px-6 py-4 text-slate-900 font-medium">{r.item_name || r.concepto || r.nombre || 'Sin nombre'}</td>
-                                      <td className="px-6 py-4 text-slate-600 text-right">{cantidad}</td>
-                                      <td className="px-6 py-4 text-slate-600 text-right">{formatCurrency(precioUnitario)}</td>
-                                      <td className="px-6 py-4 font-bold text-red-600 text-right">-{formatCurrency(cantidad * precioUnitario)}</td>
-                                    </tr>
-                                  );
-                                })
-                              )}
-                            </tbody>
-                          </table>
-                        </>
-                      )}
+{/* CONTENIDO 4: DESTAJOS E INVENTARIO */}
+{expenseSubTab === 'destajos' && (
+  <>
+    <div className="px-8 py-4 border-b border-slate-100 flex justify-between items-center bg-white">
+      <p className="text-sm text-slate-500">Registro de destajos, materiales en almacén y avances de obra.</p>
+    </div>
+    <table className="w-full text-left text-sm">
+      <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
+        <tr>
+          <th className="px-6 py-4">Fecha</th>
+          <th className="px-6 py-4">Concepto / Material</th>
+          <th className="px-6 py-4">Encargado / Recibe</th>
+          <th className="px-6 py-4">Solicitado Por</th>
+          <th className="px-6 py-4 text-right">Cantidad</th>
+          <th className="px-6 py-4 text-right">P. Unitario</th>
+          <th className="px-6 py-4 text-right">Total Acumulado</th>
+        </tr>
+      </thead>
+      <tbody className="divide-y divide-slate-100 bg-white">
+        {inventoryRecords.length === 0 ? (
+          <tr><td colSpan={7} className="px-6 py-8 text-center text-slate-400">Aún no hay destajos o inventario registrado.</td></tr>
+        ) : (
+          inventoryRecords.map((r, idx) => {
+            const cantidad = Number(r.cantidad || r.quantity || r.stock || 0);
+            const precioUnitario = Number(r.unit_price || r.precio || 0);
+            return (
+              <tr key={r.id || idx} className="hover:bg-slate-50/80">
+                <td className="px-6 py-4 text-slate-600 whitespace-nowrap">{formatDate(r.created_at || r.fecha).split(',')[0]}</td>
+                <td className="px-6 py-4 text-slate-900 font-medium">{r.name || r.concepto || r.nombre || 'Sin nombre'}</td>
+                
+                {/* 👤 COLUMNA ENCARGADO / RECIBE */}
+                <td className="px-6 py-4 text-slate-700">
+                  {r.in_charge ? (
+                    <span className="bg-slate-100 px-2.5 py-1 rounded-md text-xs font-semibold text-slate-700">
+                      👤 {r.in_charge}
+                    </span>
+                  ) : (
+                    <span className="text-slate-400 italic text-xs">No asignado</span>
+                  )}
+                </td>
+
+                {/* 📄 COLUMNA SOLICITADO POR */}
+                <td className="px-6 py-4 text-slate-700">
+                  {r.requested_by ? (
+                    <span className="bg-blue-50 border border-blue-100 px-2.5 py-1 rounded-md text-xs font-semibold text-blue-700">
+                      ✏️ {r.requested_by}
+                    </span>
+                  ) : (
+                    <span className="text-slate-400 italic text-xs">No especificado</span>
+                  )}
+                </td>
+
+                <td className="px-6 py-4 text-slate-600 text-right">
+                  {cantidad} <span className="text-xs text-slate-400 font-normal">{r.unidad || ''}</span>
+                </td>
+                <td className="px-6 py-4 text-slate-600 text-right">{formatCurrency(precioUnitario)}</td>
+                <td className="px-6 py-4 font-bold text-red-600 text-right">-{formatCurrency(cantidad * precioUnitario)}</td>
+              </tr>
+            );
+          })
+        )}
+      </tbody>
+    </table>
+  </>
+)}
                     </div>
                     
                   )}
@@ -1282,46 +1406,210 @@ const handleFinalizarObra = async () => {
         </main>
       </div>
 
-      {/* 🧾 MODAL DE GASTOS */}
-      {isExpenseModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-              <h3 className="text-lg font-bold text-slate-900">Registrar Salida / Gasto Directo</h3>
-              <button onClick={() => setIsExpenseModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
+      {/* 🧾 MODAL DE GASTOS ADAPTATIVO HOMOLOGADO */}
+{isExpenseModalOpen && (
+  <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+    <div className="bg-white rounded-2xl shadow-xl w-full max-w-xl overflow-hidden max-h-[90vh] flex flex-col">
+      
+      {/* CABECERA */}
+      <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50 shrink-0">
+        <h3 className="text-base font-bold text-slate-900">
+          {expenseSubTab === 'generales' && '🧱 Nuevo Registro - Gastos Estructurales'}
+          {expenseSubTab === 'caja_chica' && '➕ Nuevo Movimiento - Libro Mayor de Caja'}
+          {expenseSubTab === 'maquinaria' && '🚜 Alta e Importe de Maquinaria'}
+          {expenseSubTab === 'destajos' && '🛠️ Registro de Destajo / Inventario'}
+        </h3>
+        <button onClick={() => setIsExpenseModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
+      </div>
+      
+      {/* CUERPO FORMULARIO SCROLLABLE */}
+      <form onSubmit={handleSaveGasto} className="p-6 space-y-5 overflow-y-auto flex-1">
+        {expenseFormError && <div className="p-3 bg-red-50 text-red-600 text-xs rounded-xl border border-red-100">{expenseFormError}</div>}
+        
+        {/* FECHA COMÚN */}
+        <div className="w-full">
+          <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Fecha de Operación</label>
+          <input type="date" required value={fechaGasto} onChange={(e) => setFechaGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-900 text-sm focus:border-blue-500 font-medium focus:outline-none" />
+        </div>
+
+        {/* ---------------- VISTA 1: GASTOS GENERALES Y MATERIALES ---------------- */}
+        {expenseSubTab === 'generales' && (
+          <div className="space-y-4">
+            {/* Fila Clasificación del Rubro */}
+            <div>
+              <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Clasificación del Rubro</label>
+              <div className="grid grid-cols-4 gap-2">
+                {['Material', 'Admin', 'Burócrata', 'Asesoría'].map((rubro) => (
+                  <button type="button" key={rubro} onClick={() => setRubroClasificacion(rubro)} className={`py-2 text-xs font-bold rounded-xl border transition-all ${rubroClasificacion === rubro ? 'bg-amber-500 border-amber-500 text-white shadow-sm' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>{rubro}</button>
+                ))}
+              </div>
             </div>
-            
-            <form onSubmit={handleSaveGasto} className="p-6 space-y-4">
-              {expenseFormError && <div className="p-3 bg-red-50 text-red-600 text-xs rounded-xl">{expenseFormError}</div>}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div><label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">Concepto Detallado</label><input type="text" required placeholder="Ej. Cemento Tolteca..." value={conceptoGasto} onChange={(e) => setConceptoGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-900 text-sm focus:outline-none focus:border-blue-500 font-medium" /></div>
-                <div><label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">Proveedor</label><input type="text" placeholder="Ej. Materiales El Fuerte" value={proveedorGasto} onChange={(e) => setProveedorGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-900 text-sm focus:outline-none focus:border-blue-500 font-medium" /></div>
+
+            {/* Fila Estado de Pago */}
+            <div>
+              <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Estado de Pago</label>
+              <div className="grid grid-cols-3 gap-2">
+                {['Liquidado', 'Abono', 'Por Pagar'].map((estado) => (
+                  <button type="button" key={estado} onClick={() => setEstadoPago(estado)} className={`py-2 text-xs font-bold rounded-xl border transition-all ${estadoPago === estado ? 'bg-emerald-500 border-emerald-500 text-white shadow-sm' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>{estado}</button>
+                ))}
               </div>
-              <div className="grid grid-cols-3 gap-4">
-                <div><label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">Cantidad</label><input type="number" step="any" placeholder="0" value={cantidadGasto} onChange={(e) => setCantidadGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-900 text-sm focus:outline-none focus:border-blue-500 font-medium" /></div>
-                <div><label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">Unidad</label><input type="text" placeholder="Ej. TON" value={unidadGasto} onChange={(e) => setUnidadGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-900 text-sm focus:outline-none focus:border-blue-500 font-medium" /></div>
-                <div><label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">Precio Unitario</label><input type="number" step="0.01" placeholder="0.00" value={precioUnitarioGasto} onChange={(e) => setPrecioUnitarioGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-900 text-sm focus:outline-none focus:border-blue-500 font-medium" /></div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Concepto o Descripción</label><input type="text" required placeholder="Ej. Varilla de 3/8..." value={conceptoGasto} onChange={(e) => setConceptoGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
+              <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Proveedor de Materiales</label><input type="text" placeholder="Nombre o Razón social..." value={proveedorGasto} onChange={(e) => setProveedorGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-4">
+              <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Unidad de Medida</label><input type="text" placeholder="Ej. Pzas / Ton" value={unidadGasto} onChange={(e) => setUnidadGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
+              <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Cantidad</label><input type="number" step="any" placeholder="1" value={cantidadGasto} onChange={(e) => setCantidadGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
+              <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Precio Unitario ($)</label><input type="number" step="0.01" placeholder="0.00" value={precioUnitarioGasto} onChange={(e) => setPrecioUnitarioGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
+            </div>
+
+            <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Número de Cotización (Opcional)</label><input type="text" placeholder="Ej. COT-OBRA-023" value={numCotizacion} onChange={(e) => setNumCotizacion(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
+          </div>
+        )}
+
+        {/* ---------------- VISTA 2: LIBRO MAYOR DE CAJA CHICA ---------------- */}
+        {expenseSubTab === 'caja_chica' && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">No. Nota / Ticket</label><input type="text" placeholder="Opcional" value={numNota} onChange={(e) => setNumNota(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
+              <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Responsable</label><input type="text" placeholder="Nombre de quien gasta..." value={responsableGasto} onChange={(e) => setResponsableGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
+            </div>
+
+            <div className="border border-dashed border-slate-200 rounded-xl p-4 bg-slate-50/50 space-y-3">
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Artículo Adquirido</span>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                <div className="md:col-span-2"><input type="text" required placeholder="Concepto (Ej. Clavos 2 pulg)" value={conceptoGasto} onChange={(e) => setConceptoGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs focus:outline-none focus:border-blue-500 text-slate-900 font-medium" /></div>
+                <div><input type="number" required placeholder="P.U ($)" value={precioUnitarioGasto} onChange={(e) => setPrecioUnitarioGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs focus:outline-none focus:border-blue-500 text-slate-900 font-medium" /></div>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">Clasificación Financiera</label>
-                  <select value={tipoGasto} onChange={(e) => setTipoGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-900 text-sm focus:outline-none focus:border-blue-500 bg-white font-medium">
-                    <option value="Destajos y Materiales">Destajos y Materiales</option>
-                    <option value="Mano de Obra">Mano de Obra</option>
-                    <option value="Caja Chica">Caja Chica</option>
-                    <option value="Gastos Generales">Gastos Generales</option>
-                  </select>
-                </div>
-                <div><label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">Fecha de Registro</label><input type="date" required value={fechaGasto} onChange={(e) => setFechaGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-900 text-sm focus:outline-none focus:border-blue-500 font-medium" /></div>
+              <input type="number" placeholder="Cantidad (Defecto 1)" value={cantidadGasto} onChange={(e) => setCantidadGasto(e.target.value)} className="w-32 rounded-xl border border-slate-200 px-3 py-1.5 text-xs focus:outline-none focus:border-blue-500 text-slate-900 font-medium" />
+            </div>
+
+            <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Nota / Justificación Adicional</label><textarea rows={2} placeholder="Ej. Compra urgente para loza..." value={justificacionCaja} onChange={(e) => setJustificacionCaja(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
+          </div>
+        )}
+
+        {/* ---------------- VISTA 3: MAQUINARIA Y EQUIPO ---------------- */}
+        {expenseSubTab === 'maquinaria' && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Nombre del Equipo</label><input type="text" required placeholder="Ej. Retroexcavadora CAT 320" value={nombreEquipo} onChange={(e) => setNombreEquipo(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
+              <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Proveedor de Renta</label><input type="text" placeholder="Ej. Arrendadora del Centro" value={proveedorGasto} onChange={(e) => setProveedorGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Corte de Facturación / Modalidad</label>
+              <div className="flex gap-2">
+                {['Por Día', 'Por Semana', 'Por Mes'].map((mod) => (
+                  <button type="button" key={mod} onClick={() => setModalidadFacturacion(mod)} className={`px-4 py-1.5 rounded-full text-xs font-bold border transition-all ${modalidadFacturacion === mod ? 'bg-blue-600 border-blue-600 text-white' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>{mod}</button>
+                ))}
               </div>
-              <div className="bg-blue-50/50 border border-blue-100 rounded-xl p-4 mt-2">
-                <div className="flex justify-between items-center"><span className="text-xs font-bold text-blue-700 uppercase tracking-wider">Importe Total Calculado:</span><span className="text-xl font-black text-blue-900">{montoGasto ? formatCurrency(parseFloat(montoGasto)) : '$0.00'}</span></div>
-              </div>
-              <div className="pt-2 flex justify-end gap-3 border-t border-slate-100 mt-6"><button type="button" onClick={() => setIsExpenseModalOpen(false)} className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 rounded-xl">Cancelar</button><button type="submit" disabled={loadingExpenseForm || !montoGasto} className="bg-blue-600 text-white text-sm font-bold px-5 py-2 rounded-xl disabled:opacity-50 shadow-sm">{loadingExpenseForm ? 'Guardando...' : 'Confirmar Gasto'}</button></div>
-            </form>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Tarifa por HORA ($)</label><input type="number" required placeholder="Ej. 1200" value={precioUnitarioGasto} onChange={(e) => setPrecioUnitarioGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
+              <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Horas Utilizadas esta Semana</label><input type="number" required placeholder="Ej. 10" value={cantidadGasto} onChange={(e) => setCantidadGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
+            </div>
+          </div>
+        )}
+
+{/* ---------------- VISTA 4: DESTAJOS E INVENTARIO (DINÁMICO CON TU PERSONAL) ---------------- */}
+{expenseSubTab === 'destajos' && (
+  <div className="space-y-4">
+    {/* Concepto / Actividad */}
+    <div>
+      <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Concepto / Actividad</label>
+      <input type="text" required placeholder="Ej. Cemento Cruz Azul 50kg" value={conceptoGasto} onChange={(e) => setConceptoGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" />
+    </div>
+    
+    {/* Unidad y P.U */}
+    <div className="grid grid-cols-2 gap-4">
+      <div>
+        <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Unidad</label>
+        <input type="text" placeholder="Ej. Bulto" value={unidadGasto} onChange={(e) => setUnidadGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" />
+      </div>
+      <div>
+        <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">P.U / Mano de Obra ($)</label>
+        <input type="number" required placeholder="Ej. 250" value={precioUnitarioGasto} onChange={(e) => setPrecioUnitarioGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" />
+      </div>
+    </div>
+
+    {/* Volumen / Cantidad */}
+    <div>
+      <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Vol. / Cant. (Para esta semana)</label>
+      <input type="number" required placeholder="Ej. 10" value={cantidadGasto} onChange={(e) => setCantidadGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" />
+    </div>
+
+    {/* Encargado / Recibe (Dinámico de la lista de trabajadores) */}
+    <div>
+      <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Encargado / Recibe (Opcional)</label>
+      <input type="text" placeholder="Nombre del responsable..." value={encargadoRecibeDestajo} onChange={(e) => setEncargadoRecibeDestajo(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium mb-2" />
+      
+      <div className="flex gap-2 flex-wrap max-h-24 overflow-y-auto p-1 bg-slate-50 rounded-lg">
+        {workersRecords.length === 0 ? (
+          <span className="text-[11px] text-slate-400 italic p-1">No hay personal registrado en esta obra para seleccionar rápidamente.</span>
+        ) : (
+          workersRecords.map((worker) => (
+            <button 
+              type="button" 
+              key={`recibe-${worker.id}`} 
+              onClick={() => setEncargadoRecibeDestajo(worker.name)} 
+              className={`px-3 py-1 rounded-full text-xs font-semibold border transition-all truncate max-w-[150px] ${encargadoRecibeDestajo === worker.name ? 'bg-blue-600 border-blue-600 text-white shadow-sm' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'}`}
+            >
+              {worker.name}
+            </button>
+          ))
+        )}
+      </div>
+    </div>
+
+    {/* Solicitado por (Dinámico de la lista de trabajadores) */}
+    <div>
+      <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Solicitado por (Opcional)</label>
+      <input type="text" placeholder="Quién pide el material..." value={solicitadoPorDestajo} onChange={(e) => setSolicitadoPorDestajo(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium mb-2" />
+      
+      <div className="flex gap-2 flex-wrap max-h-24 overflow-y-auto p-1 bg-slate-50 rounded-lg">
+        {workersRecords.length === 0 ? (
+          <span className="text-[11px] text-slate-400 italic p-1">No hay personal registrado en esta obra para seleccionar rápidamente.</span>
+        ) : (
+          workersRecords.map((worker) => (
+            <button 
+              type="button" 
+              key={`pide-${worker.id}`} 
+              onClick={() => setSolicitadoPorDestajo(worker.name)} 
+              className={`px-3 py-1 rounded-full text-xs font-semibold border transition-all truncate max-w-[150px] ${solicitadoPorDestajo === worker.name ? 'bg-blue-600 border-blue-600 text-white shadow-sm' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'}`}
+            >
+              {worker.name}
+            </button>
+          ))
+        )}
+      </div>
+    </div>
+  </div>
+)}
+
+        {/* FOOTER - RESUMEN DE SALIDA */}
+        <div className="bg-slate-900 text-white rounded-xl p-4 mt-4 shrink-0">
+          <div className="flex justify-between items-center">
+            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Importe Total Calculado:</span>
+            <span className="text-xl font-black text-emerald-400">
+              {montoGasto ? formatCurrency(parseFloat(montoGasto)) : '$0.00'}
+            </span>
           </div>
         </div>
-      )}
+
+        <div className="pt-4 flex justify-end gap-3 border-t border-slate-100 mt-6 shrink-0">
+          <button type="button" onClick={() => setIsExpenseModalOpen(false)} className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 rounded-xl">Cancelar</button>
+          <button type="submit" disabled={loadingExpenseForm || !montoGasto} className="bg-blue-600 text-white text-sm font-bold px-6 py-2 rounded-xl disabled:opacity-50 shadow-sm transition-all hover:bg-blue-700">
+            {loadingExpenseForm ? 'Guardando en Obra...' : 'Confirmar e Insertar'}
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+)}
 
       {/* 👷‍♂️ MODAL DE ALTA DE TRABAJADOR */}
       {isWorkerModalOpen && userRole === 'admin' && (
