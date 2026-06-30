@@ -20,8 +20,9 @@ export default function DashboardPage() {
   const [rubroClasificacion, setRubroClasificacion] = useState('Material');
   const [estadoPago, setEstadoPago] = useState('Liquidado');
   const [numCotizacion, setNumCotizacion] = useState('');
-const [encargadoRecibeDestajo, setEncargadoRecibeDestajo] = useState('');
-const [solicitadoPorDestajo, setSolicitadoPorDestajo] = useState('');
+  const [encargadoRecibeDestajo, setEncargadoRecibeDestajo] = useState('');
+  const [solicitadoPorDestajo, setSolicitadoPorDestajo] = useState('');
+  
   const router = useRouter();
   const [loadingAuth, setLoadingAuth] = useState(true);
   const [userRole, setUserRole] = useState<string | null>(null); 
@@ -95,14 +96,15 @@ const [solicitadoPorDestajo, setSolicitadoPorDestajo] = useState('');
   const [updatingProject, setUpdatingProject] = useState(false);
   const [editProjectForm, setEditProjectForm] = useState({
     name: '',
-    client_name: '', // 🟢 CORRECCIÓN: usamos client_name
+    client_name: '', 
     contract_number: '',
     start_date: '',
     end_date: ''
   });
 
-
-
+  const COLORS = useMemo(() => ['#F59E0B', '#3B82F6', '#10B981', '#8B5CF6'], []);
+  
+  
   const formatCurrency = (amount: number) => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(amount);
   const formatDate = (dateString: string) => {
     if (!dateString) return 'Sin fecha';
@@ -152,13 +154,13 @@ const [solicitadoPorDestajo, setSolicitadoPorDestajo] = useState('');
   }, [cantidadGasto, precioUnitarioGasto]);
 
   const fetchMetricsAndRecords = async (projectId: string) => {
-
     setLoadingMetrics(true);
     try {
       const { data: gastos } = await supabase.from('gastos_generales').select('*').eq('project_id', projectId).eq('is_active', true).order('fecha', { ascending: false });
       setGastosGeneralesRecords(gastos || []);
 
-      const { data: workers } = await supabase.from('workers').select('*').eq('project_id', projectId).eq('status', true);
+      // 🟢 FILTRO DE ACTIVOS: is_active
+      const { data: workers } = await supabase.from('workers').select('*').eq('project_id', projectId).eq('is_active', true);
       setWorkersRecords(workers || []);
 
       const { data: caja } = await supabase.from('caja_chica').select('*').eq('project_id', projectId).order('fecha', { ascending: false });
@@ -186,7 +188,6 @@ const [solicitadoPorDestajo, setSolicitadoPorDestajo] = useState('');
       });
 
       setLastUpdated(new Date());
-
     } catch (error) {
       console.error("Error cargando el tablero:", error);
     } finally {
@@ -234,7 +235,7 @@ const [solicitadoPorDestajo, setSolicitadoPorDestajo] = useState('');
     }
 
     if (cajaChicaRecords) cajaChicaRecords.forEach(record => { totals['Caja Chica'] += Number(record.monto) || 0; });
-    if (payrollRecords) payrollRecords.forEach(record => { totals['Mano de Obra'] += Number(record.finally_salary || record.final_salary || 0); });
+    if (payrollRecords) payrollRecords.forEach(record => { totals['Mano de Obra'] += Number(record.final_salary || 0); });
     if (inventoryRecords) inventoryRecords.forEach(record => {
         const cantidad = Number(record.cantidad || record.quantity || record.stock || 1);
         const precioUnitario = Number(record.unit_price || 0);
@@ -244,7 +245,11 @@ const [solicitadoPorDestajo, setSolicitadoPorDestajo] = useState('');
     return Object.entries(totals).map(([name, value]) => ({ name, value: Number(value) })).sort((a, b) => b.value - a.value);
   }, [gastosGeneralesRecords, cajaChicaRecords, payrollRecords, inventoryRecords]);
 
-  const weeklySummaryData = useMemo(() => {
+  const totalConsolidated = useMemo(() => {
+    return chartData.reduce((sum, item) => sum + item.value, 0);
+  }, [chartData]);
+
+const weeklySummaryData = useMemo(() => {
     const weeks: Record<string, { startString: string, gastos: number, caja: number, nomina: number, destajos: number, total: number }> = {};
 
     const getMondayObj = (dString: string) => {
@@ -275,7 +280,7 @@ const [solicitadoPorDestajo, setSolicitadoPorDestajo] = useState('');
 
     gastosGeneralesRecords.forEach(r => processRecord(r, 'fecha', Number(r.monto || 0), 'gastos'));
     cajaChicaRecords.forEach(r => processRecord(r, 'fecha', Number(r.monto || 0), 'caja'));
-    payrollRecords.forEach(r => processRecord(r, r.fecha ? 'fecha' : 'created_at', Number(r.finally_salary || r.final_salary || 0), 'nomina'));
+    payrollRecords.forEach(r => processRecord(r, 'week_start', Number(r.final_salary || 0), 'nomina'));
     inventoryRecords.forEach(r => processRecord(r, 'created_at', Number(r.cantidad || r.quantity || 1) * Number(r.unit_price || 0), 'destajos'));
 
     return Object.entries(weeks)
@@ -283,111 +288,133 @@ const [solicitadoPorDestajo, setSolicitadoPorDestajo] = useState('');
       .map(([_, data]) => data);
   }, [gastosGeneralesRecords, cajaChicaRecords, payrollRecords, inventoryRecords]);
 
-  const totalConsolidated = chartData.reduce((sum, item) => sum + item.value, 0);
-  const COLORS = ['#F59E0B', '#3B82F6', '#10B981', '#8B5CF6'];
+  // 🧮 AGREGACIÓN DINÁMICA POR SEMANAS (Basado en week_start de payroll_records)
+  const registrosAgrupadosPorSemana = useMemo(() => {
+    const semanas: Record<string, { numeroSemana: string; fechaRepresentativa: Date; registros: any[]; subtotalSemana: number }> = {};
 
-const handleSaveGasto = async (e: React.FormEvent) => {
-  e.preventDefault();
-  if (!selectedProject) return;
-  setLoadingExpenseForm(true); 
-  setExpenseFormError(null);
+    payrollRecords.forEach((p) => {
+      const fecha = new Date(p.week_start || p.created_at);
+      const claveSemana = `Semana del ${fecha.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })}`;
+      const salarioFila = Number(p.final_salary || 0);
 
-  try {
-    const { data: { session } } = await supabase.auth.getSession();
-    const userId = session?.user?.id || null;
-
-    let error: any = null;
-
-    switch (expenseSubTab) {
-      case 'generales': // Tabla: gastos_generales (Módulo Registro Estructural)
-        const payloadGenerales: any = {
-          project_id: selectedProject.id,
-          concepto: conceptoGasto,
-          unidad: unidadGasto || null,
-          cantidad: cantidadGasto ? parseFloat(cantidadGasto) : null,
-          precio_unitario: precioUnitarioGasto ? parseFloat(precioUnitarioGasto) : null,
-          monto: parseFloat(montoGasto),
-          tipo: tipoGasto,
-          proveedor: proveedorGasto || null,
-          fecha: fechaGasto,
-          status: true,
-          id_residente: userId // Evitamos el constraint de null anterior
+      if (!semanas[claveSemana]) {
+        semanas[claveSemana] = {
+          numeroSemana: claveSemana,
+          fechaRepresentativa: fecha,
+          registros: [],
+          subtotalSemana: 0
         };
-        
-        // Si tu tabla maneja los campos estructurales extras de la app (imagen d85bc2):
-        if (rubroClasificacion) payloadGenerales.clasificacion_rubro = rubroClasificacion;
-        if (estadoPago) payloadGenerales.estado_pago = estadoPago;
-        if (numCotizacion) payloadGenerales.numero_cotizacion = numCotizacion;
+      }
 
-        const resGen = await supabase.from('gastos_generales').insert([payloadGenerales]);
-        error = resGen.error;
-        break;
+      semanas[claveSemana].registros.push(p);
+      semanas[claveSemana].subtotalSemana += salarioFila;
+    });
 
-      case 'caja_chica': // Tabla: caja_chica (Módulo Libro Mayor de Caja)
-        const resCaja = await supabase.from('caja_chica').insert([{
-          project_id: selectedProject.id,
-          fecha: fechaGasto,
-          encargado: responsableGasto || 'Oficina',
-          concepto: conceptoGasto, // Concepto del artículo comprado
-          monto: parseFloat(montoGasto),
-          justificacion: justificacionCaja || null,
-          numero_nota: numNota || null
-        }]);
-        error = resCaja.error;
-        break;
+    return Object.values(semanas).sort((a, b) => b.fechaRepresentativa.getTime() - a.fechaRepresentativa.getTime());
+  }, [payrollRecords]);
 
-      case 'maquinaria': // Tabla: gastos_maquinaria (Módulo Alta de Nuevo Equipo)
-        const resMaq = await supabase.from('gastos_maquinaria').insert([{
-          project_id: selectedProject.id,
-          equipo: nombreEquipo || conceptoGasto,
-          proveedor: proveedorGasto || null,
-          fecha: fechaGasto,
-          monto: parseFloat(montoGasto),
-          asistencia_dias: cantidadGasto ? parseFloat(cantidadGasto) : null, // Guarda las horas de uso
-          categoria: 'renta', // O 'anticipo' según tu lógica
-          status: true
-        }]);
-        error = resMaq.error;
-        break;
+  // 💰 COSTO TOTAL ACUMULADO
+  const totalHistoricoRaya = useMemo(() => {
+    return payrollRecords.reduce((sum, p) => sum + Number(p.final_salary || 0), 0);
+  }, [payrollRecords]);
 
-      case 'destajos': // Tabla: inventory (Módulo Registro de Destajos)
-        const resInv = await supabase.from('inventory').insert([{
-          project_id: selectedProject.id,
-          name: conceptoGasto,                  // Concepto / Actividad
-          unidad: unidadGasto || null,               // Unidad (Ej. Bulto)
-          cantidad: cantidadGasto ? parseFloat(cantidadGasto) : 1, // Vol. / Cant.
-          unit_price: precioUnitarioGasto ? parseFloat(precioUnitarioGasto) : 0, // P.U / Mano de Obra
-          in_charge: encargadoRecibeDestajo || null, // Encargado / Recibe
-          requested_by: solicitadoPorDestajo || null,     // Solicitado por
-          created_at: new Date().toISOString()
-        }]);
-        error = resInv.error;
-        break;
+  const handleSaveGasto = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedProject) return;
+    setLoadingExpenseForm(true); 
+    setExpenseFormError(null);
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const userId = session?.user?.id || null;
+      let error: any = null;
+
+      switch (expenseSubTab) {
+        case 'generales':
+          const payloadGenerales: any = {
+            project_id: selectedProject.id,
+            concepto: conceptoGasto,
+            unidad: unidadGasto || null,
+            cantidad: cantidadGasto ? parseFloat(cantidadGasto) : null,
+            precio_unitario: precioUnitarioGasto ? parseFloat(precioUnitarioGasto) : null,
+            monto: parseFloat(montoGasto),
+            tipo: tipoGasto,
+            proveedor: proveedorGasto || null,
+            fecha: fechaGasto,
+            is_active: true,
+            id_residente: userId
+          };
+          if (rubroClasificacion) payloadGenerales.clasificacion_rubro = rubroClasificacion;
+          if (estadoPago) payloadGenerales.estado_pago = estadoPago;
+          if (numCotizacion) payloadGenerales.numero_cotizacion = numCotizacion;
+
+          const resGen = await supabase.from('gastos_generales').insert([payloadGenerales]);
+          error = resGen.error;
+          break;
+
+        case 'caja_chica':
+          const resCaja = await supabase.from('caja_chica').insert([{
+            project_id: selectedProject.id,
+            fecha: fechaGasto,
+            encargado: responsableGasto || 'Oficina',
+            concepto: conceptoGasto,
+            monto: parseFloat(montoGasto),
+            justificacion: justificacionCaja || null,
+            numero_nota: numNota || null
+          }]);
+          error = resCaja.error;
+          break;
+
+        case 'maquinaria':
+          const resMaq = await supabase.from('gastos_maquinaria').insert([{
+            project_id: selectedProject.id,
+            equipo: nombreEquipo || conceptoGasto,
+            proveedor: proveedorGasto || null,
+            fecha: fechaGasto,
+            monto: parseFloat(montoGasto),
+            asistencia_dias: cantidadGasto ? parseFloat(cantidadGasto) : null,
+            categoria: 'renta',
+          }]); 
+          error = resMaq.error;
+          break;
+
+        case 'destajos':
+          const resInv = await supabase.from('inventory').insert([{
+            project_id: selectedProject.id,
+            item_name: conceptoGasto, 
+            unidad: unidadGasto || null,
+            cantidad: cantidadGasto ? parseFloat(cantidadGasto) : 1,
+            unit_price: precioUnitarioGasto ? parseFloat(precioUnitarioGasto) : 0,
+            encargado_recibe: encargadoRecibeDestajo || null, 
+            solicitado_por: solicitadoPorDestajo || null,     
+            created_at: new Date().toISOString()
+          }]);
+          error = resInv.error;
+          break;
+      }
+
+      if (error) throw error;
+
+      setConceptoGasto(''); setUnidadGasto(''); setCantidadGasto(''); setPrecioUnitarioGasto(''); 
+      setMontoGasto(''); setProveedorGasto(''); setNumNota(''); setResponsableGasto(''); setJustificacionCaja('');
+      setNombreEquipo(''); setNumCotizacion(''); setEncargadoRecibeDestajo(''); setSolicitadoPorDestajo('');
+      
+      setIsExpenseModalOpen(false);
+      await fetchMetricsAndRecords(selectedProject.id);
+
+    } catch (err: any) { 
+      setExpenseFormError(err.message); 
+    } finally { 
+      setLoadingExpenseForm(false); 
     }
-
-    if (error) throw error;
-
-    // Limpieza de campos comunes
-    setConceptoGasto(''); setUnidadGasto(''); setCantidadGasto(''); setPrecioUnitarioGasto(''); 
-    setMontoGasto(''); setProveedorGasto(''); setNumNota(''); setResponsableGasto(''); setJustificacionCaja('');
-    setNombreEquipo(''); setNumCotizacion('');
-    
-    setIsExpenseModalOpen(false);
-    await fetchMetricsAndRecords(selectedProject.id);
-
-  } catch (err: any) { 
-    setExpenseFormError(err.message); 
-  } finally { 
-    setLoadingExpenseForm(false); 
-  }
-};
+  };
 
   const handleCreateWorker = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedProject || userRole !== 'admin') return; 
     setLoadingWorkerForm(true); setWorkerFormError(null);
     try {
-      const { error } = await supabase.from('workers').insert([{ project_id: selectedProject.id, name: newWorkerName, role: newWorkerRole, phone: newWorkerPhone || null, status: true }]);
+      const { error } = await supabase.from('workers').insert([{ project_id: selectedProject.id, name_worker: newWorkerName, role: newWorkerRole, phone: newWorkerPhone || null, is_active: true }]);
       if (error) throw error;
       setNewWorkerName(''); setNewWorkerRole('Peón'); setNewWorkerPhone(''); setIsWorkerModalOpen(false);
       await fetchMetricsAndRecords(selectedProject.id);
@@ -398,7 +425,6 @@ const handleSaveGasto = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoadingProjectForm(true); setProjectFormError(null);
     try {
-      // 🟢 CORRECCIÓN: Guardamos 'client_name' en lugar de 'cliente'
       const { data, error } = await supabase.from('projects').insert([{ name: newProjectName, client_name: newProjectCliente, start_date: newProjectFechaInicio || null, end_date: newProjectFechaFin || null, contract_number: newProjectNumContrato }]).select();
       if (error) throw error;
       if (data && data.length > 0) {
@@ -504,7 +530,7 @@ const handleSaveGasto = async (e: React.FormEvent) => {
       const totalDeductions = absenceDeduction + extraDeduction;
       const finalSalary = Math.max(0, (dailySalary * daysPresent) - extraDeduction);
       const notaLimpia = (w.reason || '').replace(/,/g, ' '); 
-      return `"${w.name}","${w.role}",${weekly_salary.toFixed(2)},${daysPresent},${daysAbsent},${totalDeductions.toFixed(2)},"${notaLimpia}",${finalSalary.toFixed(2)}`;
+      return `"${w.name_worker || w.name}","${w.role}",${weekly_salary.toFixed(2)},${daysPresent},${daysAbsent},${totalDeductions.toFixed(2)},"${notaLimpia}",${finalSalary.toFixed(2)}`;
     });
     const csvContent = [headers.join(','), ...rows].join('\n');
     const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -533,7 +559,7 @@ const handleSaveGasto = async (e: React.FormEvent) => {
       const totalDeductions = (daysAbsent * dailySalary) + Number(worker.extraDeduction || 0);
       const finalSalary = calculateFinalSalary(worker);
       const reasonText = worker.reason ? `<br><span style="font-size: 9px; color: #DC2626;">(${worker.reason})</span>` : '';
-      return `<tr class="${index % 2 === 0 ? 'bg-gray' : ''}"><td><strong>${worker.name}</strong><br><span style="font-size:10px;color:#666;">${worker.role}</span></td><td style="text-align:center;">$${(Number(worker.weekly_salary) || 0).toFixed(2)}</td><td style="text-align:center;color:#DC2626;">${daysAbsent > 0 ? daysAbsent : '-'}</td><td style="text-align:center;color:#DC2626;">${totalDeductions > 0 ? '-$' + totalDeductions.toFixed(2) : '-'}${reasonText}</td><td style="text-align:right;font-weight:bold;color:#059669;">$${finalSalary.toFixed(2)}</td><td style="text-align:center;"><div style="border-bottom:1px solid #999;width:80px;margin:auto;"></div></td></tr>`;
+      return `<tr class="${index % 2 === 0 ? 'bg-gray' : ''}"><td><strong>${worker.name_worker || worker.name}</strong><br><span style="font-size:10px;color:#666;">${worker.role}</span></td><td style="text-align:center;">$${(Number(worker.weekly_salary) || 0).toFixed(2)}</td><td style="text-align:center;color:#DC2626;">${daysAbsent > 0 ? daysAbsent : '-'}</td><td style="text-align:center;color:#DC2626;">${totalDeductions > 0 ? '-$' + totalDeductions.toFixed(2) : '-'}${reasonText}</td><td style="text-align:right;font-weight:bold;color:#059669;">$${finalSalary.toFixed(2)}</td><td style="text-align:center;"><div style="border-bottom:1px solid #999;width:80px;margin:auto;"></div></td></tr>`;
     }).join('');
 
     const htmlContent = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{font-family:sans-serif;padding:40px;}table{width:100%;border-collapse:collapse;font-size:12px;margin-top:20px;}th{background:#1E293B;color:#fff;padding:8px;text-align:left;}td{padding:8px;border-bottom:1px solid #eee;}.bg-gray{background:#F8FAFC;}</style></head><body><h2>Constructora Rocal S.A.</h2><h3>Reporte de Raya: ${projectName}</h3><table><thead><tr><th>Trabajador</th><th style="text-align:center;">Sueldo Base</th><th style="text-align:center;">Faltas</th><th style="text-align:center;">Descuentos</th><th style="text-align:right;">Pagar</th><th style="text-align:center;">Firma</th></tr></thead><tbody>${rowsHtml}</tbody></table><div style="float:right;margin-top:20px;border:1px solid #ccc;padding:15px;"><strong>Total a Pagar: $${totalFinal.toFixed(2)}</strong></div><script>setTimeout(()=>{window.print();},500);</script></body></html>`;
@@ -543,11 +569,10 @@ const handleSaveGasto = async (e: React.FormEvent) => {
     setTimeout(() => { if (document.body.contains(iframe)) document.body.removeChild(iframe); }, 10000);
   };
 
-  // ✏️ FUNCIONES PARA EDITAR PROYECTO
   const startEditingProject = () => {
     setEditProjectForm({
       name: selectedProject?.name || '',
-      client_name: selectedProject?.client_name || '', // 🟢 CORRECCIÓN: leemos client_name
+      client_name: selectedProject?.client_name || '',
       contract_number: selectedProject?.contract_number || '',
       start_date: selectedProject?.start_date ? selectedProject.start_date.split('T')[0] : '',
       end_date: selectedProject?.end_date ? selectedProject.end_date.split('T')[0] : ''
@@ -563,7 +588,7 @@ const handleSaveGasto = async (e: React.FormEvent) => {
         .from('projects')
         .update({
           name: editProjectForm.name,
-          client_name: editProjectForm.client_name, // 🟢 CORRECCIÓN: enviamos client_name
+          client_name: editProjectForm.client_name, 
           contract_number: editProjectForm.contract_number,
           start_date: editProjectForm.start_date || null,
           end_date: editProjectForm.end_date || null,
@@ -584,143 +609,134 @@ const handleSaveGasto = async (e: React.FormEvent) => {
       setUpdatingProject(false);
     }
   };
-// 🏁 FUNCIÓN: GENERAR REPORTE MAESTRO Y SUBIRLO A SUPABASE (Versión Web Optimizada)
-const generarReporteMaestroPDF = async (montoTotal: number): Promise<string | null> => {
-  try {
-    const projectName = selectedProject?.name || 'Obra sin nombre';
-    const fechaCierre = new Date().toLocaleDateString('es-MX', { year: 'numeric', month: 'long', day: 'numeric' });
 
-    const doc = new jsPDF();
+  const generarReporteMaestroPDF = async (montoTotal: number): Promise<string | null> => {
+    try {
+      const projectName = selectedProject?.name || 'Obra sin nombre';
+      const fechaCierre = new Date().toLocaleDateString('es-MX', { year: 'numeric', month: 'long', day: 'numeric' });
 
-    // Diseño del PDF
-    doc.setFontSize(20);
-    doc.setTextColor(15, 23, 42);
-    doc.text('ACTA DE CIERRE DE OBRA', 14, 20);
+      const doc = new jsPDF();
 
-    doc.setDrawColor(37, 99, 235);
-    doc.setLineWidth(0.8);
-    doc.line(14, 24, 196, 24);
+      doc.setFontSize(20);
+      doc.setTextColor(15, 23, 42);
+      doc.text('ACTA DE CIERRE DE OBRA', 14, 20);
 
-    doc.setFontSize(10);
-    doc.setTextColor(100, 116, 139);
-    doc.text(`Proyecto: ${projectName}  |  Cliente: ${selectedProject?.client_name || 'N/A'}`, 14, 32);
-    doc.text(`Contrato: ${selectedProject?.contract_number || 'N/A'}  |  Fecha de Cierre: ${fechaCierre}`, 14, 38);
+      doc.setDrawColor(37, 99, 235);
+      doc.setLineWidth(0.8);
+      doc.line(14, 24, 196, 24);
 
-    let y = 50;
-    doc.setFontSize(9);
-    doc.setTextColor(100, 116, 139);
-    doc.text('COSTO DIRECTO TOTAL', 14, y);
-    doc.text('PERSONAL CONTRATADO', 84, y);
-    doc.text('REPORTES EN BITÁCORA', 154, y);
+      doc.setFontSize(10);
+      doc.setTextColor(100, 116, 139);
+      doc.text(`Proyecto: ${projectName}  |  Cliente: ${selectedProject?.client_name || 'N/A'}`, 14, 32);
+      doc.text(`Contrato: ${selectedProject?.contract_number || 'N/A'}  |  Fecha de Cierre: ${fechaCierre}`, 14, 38);
 
-    y += 7;
-    doc.setFontSize(14);
-    doc.setTextColor(239, 68, 68);
-    doc.text(formatCurrency(montoTotal), 14, y); // Pasamos el monto por parámetro seguro
-    doc.setTextColor(15, 23, 42);
-    doc.text(String(metrics.personalActivo), 84, y);
-    doc.text(String(bitacoraRecords.length), 154, y);
+      let y = 50;
+      doc.setFontSize(9);
+      doc.setTextColor(100, 116, 139);
+      doc.text('COSTO DIRECTO TOTAL', 14, y);
+      doc.text('PERSONAL CONTRATADO', 84, y);
+      doc.text('REPORTES EN BITÁCORA', 154, y);
 
-    y += 12;
-    autoTable(doc, {
-      startY: y,
-      head: [['Rubro Financiero', 'Monto Acumulado', 'Participación (%)']],
-      body: chartData.map(item => {
-        const percentage = montoTotal > 0 ? ((item.value / montoTotal) * 100).toFixed(1) : '0';
-        return [item.name, formatCurrency(item.value), `${percentage}%`];
-      }),
-      theme: 'grid',
-      headStyles: { fillColor: [241, 245, 249], textColor: [30, 41, 59], fontStyle: 'bold' },
-      styles: { fontSize: 9 },
-      columnStyles: {
-        1: { halign: 'right' },
-        2: { halign: 'right' }
-      }
-    });
+      y += 7;
+      doc.setFontSize(14);
+      doc.setTextColor(239, 68, 68);
+      doc.text(formatCurrency(montoTotal), 14, y); 
+      doc.setTextColor(15, 23, 42);
+      doc.text(String(metrics.personalActivo), 84, y);
+      doc.text(String(bitacoraRecords.length), 154, y);
 
-    const finalY = (doc as any).lastAutoTable.finalY || y + 40;
-    doc.setFontSize(8);
-    doc.setTextColor(148, 163, 184);
-    doc.text('Documento generado automáticamente por el sistema de control de obra.', 105, finalY + 20, { align: 'center' });
-    doc.text('Firmas de conformidad requeridas en anexo físico.', 105, finalY + 25, { align: 'center' });
-
-    // 🟢 CORRECCIÓN DEL BLOB PARA NAVEGADOR
-    const pdfArrayBuffer = doc.output('arraybuffer');
-    const pdfBlob = new Blob([pdfArrayBuffer], { type: 'application/pdf' });
-    
-    const fileName = `${selectedProject?.id}_${Date.now()}.pdf`;
-    const filePath = `actas_cierre/${fileName}`;
-
-    // Subida al Storage
-    const { error: uploadError } = await supabase.storage
-      .from('reportes_cierre')
-      .upload(filePath, pdfBlob, { 
-        cacheControl: '3600',
-        upsert: true 
+      y += 12;
+      autoTable(doc, {
+        startY: y,
+        head: [['Rubro Financiero', 'Monto Acumulado', 'Participación (%)']],
+        body: chartData.map(item => {
+          const percentage = montoTotal > 0 ? ((item.value / montoTotal) * 100).toFixed(1) : '0';
+          return [item.name, formatCurrency(item.value), `${percentage}%`];
+        }),
+        theme: 'grid',
+        headStyles: { fillColor: [241, 245, 249], textColor: [30, 41, 59], fontStyle: 'bold' },
+        styles: { fontSize: 9 },
+        columnStyles: {
+          1: { halign: 'right' },
+          2: { halign: 'right' }
+        }
       });
 
-    if (uploadError) {
-      throw new Error(`Error en Storage: ${uploadError.message}`);
+      const finalY = (doc as any).lastAutoTable.finalY || y + 40;
+      doc.setFontSize(8);
+      doc.setTextColor(148, 163, 184);
+      doc.text('Documento generado automáticamente por el sistema de control de obra.', 105, finalY + 20, { align: 'center' });
+      doc.text('Firmas de conformidad requeridas en anexo físico.', 105, finalY + 25, { align: 'center' });
+
+      const pdfArrayBuffer = doc.output('arraybuffer');
+      const pdfBlob = new Blob([pdfArrayBuffer], { type: 'application/pdf' });
+      
+      const fileName = `${selectedProject?.id}_${Date.now()}.pdf`;
+      const filePath = `actas_cierre/${fileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('reportes_cierre')
+        .upload(filePath, pdfBlob, { 
+          cacheControl: '3600',
+          upsert: true 
+        });
+
+      if (uploadError) {
+        throw new Error(`Error en Storage: ${uploadError.message}`);
+      }
+
+      const { data: publicUrlData } = supabase.storage.from('reportes_cierre').getPublicUrl(filePath);
+      return publicUrlData.publicUrl;
+
+    } catch (err: any) {
+      console.error('Error dentro de generarReporteMaestroPDF:', err);
+      alert('Falló la creación del PDF: ' + err.message);
+      return null;
     }
+  };
 
-    // Obtener y retornar la URL pública
-    const { data: publicUrlData } = supabase.storage.from('reportes_cierre').getPublicUrl(filePath);
-    return publicUrlData.publicUrl;
+  const handleFinalizarObra = async () => {
+    if (!selectedProject) return;
+    setFinishingProject(true);
 
-  } catch (err: any) {
-    console.error('Error dentro de generarReporteMaestroPDF:', err);
-    alert('Falló la creación del PDF: ' + err.message);
-    return null;
-  }
-};
+    try {
+      const pdfUrl = await generarReporteMaestroPDF(totalConsolidated);
+      
+      if (!pdfUrl) {
+        throw new Error('El Storage de Supabase no devolvió una URL válida.');
+      }
 
-/// 🏁 FUNCIÓN: EJECUTAR EL CIERRE
-const handleFinalizarObra = async () => {
-  if (!selectedProject) return;
-  setFinishingProject(true);
+      const { error } = await supabase
+        .from('projects')
+        .update({
+          status: 'finalizada',
+          end_date: new Date().toISOString().split('T')[0],
+          reporte_cierre_url: pdfUrl
+        })
+        .eq('id', selectedProject.id);
 
-  try {
-    // 🟢 Enviamos el totalConsolidated explícitamente para evitar desfases de scope
-    const pdfUrl = await generarReporteMaestroPDF(totalConsolidated);
-    
-    if (!pdfUrl) {
-      throw new Error('El Storage de Supabase no devolvió una URL válida.');
+      if (error) throw new Error(`Error actualizando tabla: ${error.message}`);
+
+      const obrasRestantes = projects.filter(p => p.id !== selectedProject.id);
+      setProjects(obrasRestantes);
+      setSelectedProject(obrasRestantes.length > 0 ? obrasRestantes[0] : null);
+      setIsFinishModalOpen(false);
+
+      alert('¡Obra finalizada exitosamente! El archivo se cargó en el Storage y la tabla se actualizó.');
+
+    } catch (error: any) {
+      console.error('Error en handleFinalizarObra:', error);
+      alert('Error crítico al finalizar la obra: ' + error.message);
+    } finally {
+      setFinishingProject(false);
     }
+  };
 
-    // Actualizar la tabla si el PDF fue exitoso
-    const { error } = await supabase
-      .from('projects')
-      .update({
-        status: 'finalizada',
-        end_date: new Date().toISOString().split('T')[0],
-        reporte_cierre_url: pdfUrl
-      })
-      .eq('id', selectedProject.id);
-
-    if (error) throw new Error(`Error actualizando tabla: ${error.message}`);
-
-    // Actualizar la lista en pantalla
-    const obrasRestantes = projects.filter(p => p.id !== selectedProject.id);
-    setProjects(obrasRestantes);
-    setSelectedProject(obrasRestantes.length > 0 ? obrasRestantes[0] : null);
-    setIsFinishModalOpen(false);
-
-    alert('¡Obra finalizada exitosamente! El archivo se cargó en el Storage y la tabla se actualizó.');
-
-  } catch (error: any) {
-    console.error('Error en handleFinalizarObra:', error);
-    alert('Error crítico al finalizar la obra: ' + error.message);
-  } finally {
-    setFinishingProject(false);
-  }
-};
   return (
     <div className="flex min-h-screen bg-slate-50">
       
       {/* 🌑 BARRA LATERAL ESTILIZADA */}
       <div className="w-64 bg-[#0F172A] text-white flex flex-col shrink-0 border-r border-slate-800 h-screen relative overflow-hidden">
-        
-        {/* --- CABECERA ESTÁTICA --- */}
         <div className="shrink-0">
           <div className="p-8 pb-4">
             <img 
@@ -743,8 +759,6 @@ const handleFinalizarObra = async () => {
           </div>
         </div>
 
-        {/* --- 🟢 ZONA SCROLLABLE (LISTA DE OBRAS) --- */}
-        {/* flex-1 toma el espacio sobrante, overflow-y-auto permite el scroll */}
         <nav className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent p-3" style={{maxHeight: 'calc(100vh - 280px)'}}>
           {projects.map(proj => (
             <button 
@@ -761,8 +775,6 @@ const handleFinalizarObra = async () => {
           ))}
         </nav>
 
-        {/* --- PIE ESTÁTICO (BOTONES INFERIORES) --- */}
-        {/* shrink-0 evita que esta sección se aplaste cuando hay muchas obras */}
         <div className="shrink-0 bg-[#0F172A]">
           <div className="pt-4 border-t border-slate-800 flex flex-col gap-2 px-5 mb-4 mt-2">
             <Link href="/perfil" className="flex items-center gap-3 py-2 text-slate-400 hover:text-white text-sm font-semibold transition-colors">
@@ -789,13 +801,10 @@ const handleFinalizarObra = async () => {
             </button>
           </div>
         </div>
-
       </div>
 
       {/* ☀️ CONTENIDO PRINCIPAL */}
       <div className="flex-1 flex flex-col h-screen overflow-hidden">
-        
-        {/* 🟢 HEADER PRINCIPAL CON BOTÓN DE SINCRONIZACIÓN */}
         <header className="bg-white border-b border-slate-200 h-16 flex items-center justify-between px-8 shadow-sm shrink-0">
           <h2 className="text-lg font-semibold text-slate-800">{selectedProject ? `Tablero: ${selectedProject.name}` : 'Selección de Proyecto'}</h2>
           
@@ -814,7 +823,6 @@ const handleFinalizarObra = async () => {
                 onClick={() => fetchMetricsAndRecords(selectedProject.id)} 
                 disabled={loadingMetrics}
                 className="flex items-center gap-2 bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900 text-xs font-bold px-4 py-2 rounded-lg transition-colors disabled:opacity-50 border border-slate-200"
-                title="Forzar descarga de datos desde campo"
               >
                 <svg className={`w-4 h-4 ${loadingMetrics ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
                 {loadingMetrics ? 'Actualizando...' : 'Actualizar App'}
@@ -827,31 +835,22 @@ const handleFinalizarObra = async () => {
           {selectedProject ? (
             <div className="max-w-7xl mx-auto space-y-8">
               
-              {/* TARJETA DE INFO DEL PROYECTO (CON MODO EDICIÓN) */}
+              {/* TARJETA DE INFO DEL PROYECTO */}
               <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 relative transition-all">
                 {userRole === 'admin' && !isEditingProject && (
                   <div className="absolute top-4 right-4 flex gap-2 z-10">
                     <button 
                       type="button"
-                      onClick={(e) => { 
-                        e.preventDefault(); 
-                        e.stopPropagation(); 
-                        setIsFinishModalOpen(true); 
-                      }} 
-                      className="flex items-center gap-1.5 text-red-500 hover:text-white transition-colors bg-red-50 px-2 py-1.5 rounded-lg hover:bg-red-500 text-xs font-bold cursor-pointer" 
-                      title="Finalizar Obra y Mover a Historial"
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); setIsFinishModalOpen(true); }} 
+                      className="flex items-center gap-1.5 text-red-500 hover:text-white transition-colors bg-red-50 px-2 py-1.5 rounded-lg hover:bg-red-500 text-xs font-bold cursor-pointer"
                     >
                       <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>
                       Cerrar Obra
                     </button>
                     <button 
                       type="button"
-                      onClick={(e) => { 
-                        e.preventDefault(); 
-                        startEditingProject(); 
-                      }} 
-                      className="text-slate-400 hover:text-blue-600 transition-colors bg-slate-50 p-1.5 rounded-lg hover:bg-blue-50 cursor-pointer" 
-                      title="Editar detalles de la obra"
+                      onClick={(e) => { e.preventDefault(); startEditingProject(); }} 
+                      className="text-slate-400 hover:text-blue-600 transition-colors bg-slate-50 p-1.5 rounded-lg hover:bg-blue-50 cursor-pointer"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                     </button>
@@ -862,7 +861,6 @@ const handleFinalizarObra = async () => {
                   <div className="animate-fade-in">
                     <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-sm mb-4">
                       <div><label className="text-xs font-bold text-slate-400 block uppercase tracking-wider mb-1">Proyecto / Obra</label><input type="text" value={editProjectForm.name} onChange={(e) => setEditProjectForm({...editProjectForm, name: e.target.value})} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
-                      {/* 🟢 CORRECCIÓN DE VISUALIZACIÓN DEL INPUT AQUÍ TAMBIÉN */}
                       <div><label className="text-xs font-bold text-slate-400 block uppercase tracking-wider mb-1">Cliente de Obra</label><input type="text" value={editProjectForm.client_name} onChange={(e) => setEditProjectForm({...editProjectForm, client_name: e.target.value})} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
                       <div><label className="text-xs font-bold text-slate-400 block uppercase tracking-wider mb-1">No. de Contrato</label><input type="text" value={editProjectForm.contract_number} onChange={(e) => setEditProjectForm({...editProjectForm, contract_number: e.target.value})} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
                       <div className="grid grid-cols-2 gap-2">
@@ -872,15 +870,12 @@ const handleFinalizarObra = async () => {
                     </div>
                     <div className="flex justify-end gap-3 border-t border-slate-100 pt-4">
                       <button onClick={() => setIsEditingProject(false)} className="px-4 py-2 text-xs font-bold text-slate-500 hover:bg-slate-100 rounded-lg transition-colors">Cancelar</button>
-                      <button onClick={handleUpdateProject} disabled={updatingProject} className="px-6 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50">
-                        {updatingProject ? 'Guardando...' : 'Guardar Cambios'}
-                      </button>
+                      <button onClick={handleUpdateProject} disabled={updatingProject} className="px-6 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50">Guardar Cambios</button>
                     </div>
                   </div>
                 ) : (
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm pr-10">
                     <div><span className="text-xs font-bold text-slate-400 block uppercase tracking-wider">Proyecto / Obra:</span> <span className="font-bold text-slate-800 text-base block">{selectedProject.name}</span></div>
-                    {/* 🟢 CORRECCIÓN DE VISUALIZACIÓN TEXTO */}
                     <div><span className="text-xs font-bold text-slate-400 block uppercase tracking-wider">Cliente de Obra:</span> <span className="font-semibold text-slate-800 block">{selectedProject.client_name || 'No registrado'}</span></div>
                     <div><span className="text-xs font-bold text-slate-400 block uppercase tracking-wider">No. de Contrato:</span> <span className="font-mono text-slate-800 font-bold block">{selectedProject.contract_number || 'No registrado'}</span></div>
                     <div><span className="text-xs font-bold text-slate-400 block uppercase tracking-wider">Periodo de Obra:</span> <span className="font-semibold text-slate-800 block">{formatDate(selectedProject.start_date).split(',')[0]} al {formatDate(selectedProject.end_date).split(',')[0]}</span></div>
@@ -900,20 +895,17 @@ const handleFinalizarObra = async () => {
 
                 <div className="overflow-x-auto">
                   
-                  {/* 📊 PESTAÑA FUSIONADA: ANÁLISIS SEMANAL */}
-                  {!loadingMetrics && activeTab === 'analisis' && (
+                  {/* PESTAÑAS EXISTENTES: ANALISIS, CAJA (MATERIALES, CAJA CHICA, MAQUINARIA, DESTAJOS) */}
+                  {activeTab === 'analisis' && (
                     <div className="flex flex-col space-y-8 p-8">
-                      
-                      {/* HEADER Y EXPORTS */}
                       <div className="flex justify-between items-center bg-white">
                         <p className="text-sm text-slate-500">Monitoreo analítico global consolidado y resumen semanal.</p>
                         <div className="flex gap-2">
-                          <button onClick={handleExportGastosCSV} disabled={gastosGeneralesRecords.length === 0} className="flex items-center gap-2 bg-slate-100 text-slate-700 hover:bg-slate-200 text-sm font-bold px-4 py-2 rounded-xl transition-colors border border-slate-200 disabled:opacity-50 shadow-sm">Exportar Excel</button>
-                          <button onClick={handleExportGastosPDF} disabled={totalConsolidated === 0} className="flex items-center gap-2 bg-slate-900 text-white hover:bg-slate-800 text-sm font-bold px-4 py-2 rounded-xl transition-colors disabled:opacity-50 shadow-sm"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-3a2 2 0 00-2-2H5a2 2 0 00-2 2v3a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg> Imprimir PDF</button>
+                          <button onClick={handleExportGastosCSV} disabled={gastosGeneralesRecords.length === 0} className="bg-slate-100 border border-slate-200 text-slate-700 px-4 py-2 rounded-xl text-sm font-bold">Exportar Excel</button>
+                          <button onClick={handleExportGastosPDF} disabled={totalConsolidated === 0} className="bg-slate-900 text-white px-4 py-2 rounded-xl text-sm font-bold">Imprimir PDF</button>
                         </div>
                       </div>
 
-                      {/* SECCIÓN 1: DONA Y TOTALES */}
                       {totalConsolidated > 0 ? (
                         <div className="bg-slate-50 border border-slate-200 rounded-2xl grid grid-cols-1 md:grid-cols-2 gap-8 items-center p-8">
                           <div>
@@ -921,24 +913,18 @@ const handleFinalizarObra = async () => {
                               <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1">Costo Directo Total Acumulado</span>
                               <span className="text-3xl font-black text-slate-900 tracking-tight">{formatCurrency(totalConsolidated)}</span>
                             </div>
-
-                            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3 flex items-center gap-2">
-                              <svg className="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.488 9H15 V3.512A9.025 9.025 0 0120.488 9z" /></svg>
-                              Distribución por Macro Rubro
-                            </h3>
-                            
                             <div className="space-y-4">
                               {chartData.map((item, idx) => {
                                 const percentage = totalConsolidated > 0 ? ((item.value / totalConsolidated) * 100).toFixed(1) : '0';
                                 return (
                                   <div key={idx} className="flex justify-between items-center text-sm">
                                     <div className="flex items-center gap-3">
-                                      <div className="w-3 h-3 rounded-full shadow-sm" style={{ backgroundColor: COLORS[idx % COLORS.length] }}></div>
+                                      <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[idx % COLORS.length] }}></div>
                                       <span className="font-medium text-slate-700">{item.name}</span>
                                     </div>
-                                    <div className="text-right flex items-center gap-4">
+                                    <div className="text-right">
                                       <span className="font-bold text-slate-900">{formatCurrency(item.value)}</span>
-                                      <span className="text-xs font-bold text-slate-500 w-12 text-right">{percentage}%</span>
+                                      <span className="text-xs text-slate-400 ml-2">{percentage}%</span>
                                     </div>
                                   </div>
                                 );
@@ -948,457 +934,274 @@ const handleFinalizarObra = async () => {
                           <div className="h-72 w-full">
                             <ResponsiveContainer width="100%" height={280}>
                               <PieChart>
-                                <Pie data={chartData} cx="50%" cy="50%" innerRadius={75} outerRadius={110} paddingAngle={4} dataKey="value" stroke="none">
+                                <Pie data={chartData} cx="50%" cy="50%" innerRadius={75} outerRadius={110} dataKey="value" stroke="none">
                                   {chartData.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}
                                 </Pie>
-                                <Tooltip formatter={(value: any) => [formatCurrency(Number(value)), 'Monto']} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                                <Tooltip formatter={(value: any) => [formatCurrency(Number(value))]} />
                               </PieChart>
                             </ResponsiveContainer>
                           </div>
                         </div>
                       ) : (
-                        <div className="p-8 bg-slate-50 border border-slate-200 rounded-2xl text-center text-sm text-slate-400 font-medium">No hay suficientes datos registrados para la gráfica.</div>
+                        <div className="p-8 text-center text-slate-400">Aún no hay suficientes datos históricos.</div>
                       )}
 
-                      {/* SECCIÓN 2: TABLA RESUMEN SEMANAL */}
                       <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
-                        <div className="px-6 py-4 border-b border-slate-100 bg-slate-50">
-                          <h3 className="text-sm font-bold text-slate-800">Corte Financiero Semanal (Lunes a Domingo)</h3>
-                        </div>
                         <table className="w-full text-left text-sm">
-                          <thead className="bg-white border-b border-slate-200 text-slate-600 font-semibold">
-                            <tr>
-                              <th className="px-6 py-4">Semana Laboral</th>
-                              <th className="px-6 py-4 text-right">Mano de Obra (Nómina)</th>
-                              <th className="px-6 py-4 text-right">Destajos / Materiales</th>
-                              <th className="px-6 py-4 text-right">Caja Chica y Oficina</th>
-                              <th className="px-6 py-4 text-right text-slate-900 font-bold">Salida Total</th>
-                            </tr>
+                          <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
+                            <tr><th>Semana Laboral</th><th className="text-right">Mano de Obra</th><th className="text-right">Destajos / Mat.</th><th className="text-right">Caja Chica</th><th className="text-right">Salida Total</th></tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100 bg-white">
-                            {weeklySummaryData.length === 0 ? (
-                              <tr><td colSpan={5} className="px-6 py-8 text-center text-slate-400">No hay registros financieros para agrupar.</td></tr>
-                            ) : (
-                              weeklySummaryData.map((week, idx) => (
-                                <tr key={idx} className="hover:bg-slate-50/80">
-                                  <td className="px-6 py-4 font-medium text-slate-900">Semana del {week.startString}</td>
-                                  <td className="px-6 py-4 text-right text-blue-600 font-medium">{formatCurrency(week.nomina)}</td>
-                                  <td className="px-6 py-4 text-right text-amber-600 font-medium">{formatCurrency(week.destajos)}</td>
-                                  <td className="px-6 py-4 text-right text-slate-600 font-medium">{formatCurrency(week.gastos + week.caja)}</td>
-                                  <td className="px-6 py-4 text-right font-bold text-red-600">-{formatCurrency(week.total)}</td>
-                                </tr>
-                              ))
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
-
-                    </div>
-                  )}
-
-                  {/* 💰 PESTAÑA CON SUBMENÚ DE GASTOS */}
-                  {!loadingMetrics && activeTab === 'caja' && (
-                    <div className="flex flex-col">
-                      
-                      {/* 📑 SUBMENÚ TIPO PÍLDORAS */}
-                      <div className="px-8 py-4 border-b border-slate-200 bg-slate-50 flex gap-3 overflow-x-auto items-center">
-                        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider mr-2">Categoría:</span>
-                        
-                        <button 
-                          onClick={() => setExpenseSubTab('generales')} 
-                          className={`px-5 py-2 rounded-full text-xs font-bold transition-all border ${expenseSubTab === 'generales' ? 'bg-blue-600 border-blue-600 text-white shadow-md' : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-100'}`}
-                        >
-                          🧱 Materiales y Generales
-                        </button>
-                        
-                        <button 
-                          onClick={() => setExpenseSubTab('caja_chica')} 
-                          className={`px-5 py-2 rounded-full text-xs font-bold transition-all border ${expenseSubTab === 'caja_chica' ? 'bg-blue-600 border-blue-600 text-white shadow-md' : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-100'}`}
-                        >
-                          💵 Caja Chica
-                        </button>
-                        
-                        <button 
-                          onClick={() => setExpenseSubTab('maquinaria')} 
-                          className={`px-5 py-2 rounded-full text-xs font-bold transition-all border ${expenseSubTab === 'maquinaria' ? 'bg-blue-600 border-blue-600 text-white shadow-md' : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-100'}`}
-                        >
-                          🚜 Maquinaria y Equipo
-                        </button>
-
-                        <button 
-                          onClick={() => setExpenseSubTab('destajos')} 
-                          className={`px-5 py-2 rounded-full text-xs font-bold transition-all border ${expenseSubTab === 'destajos' ? 'bg-blue-600 border-blue-600 text-white shadow-md' : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-100'}`}
-                        >
-                          🛠️ Destajos e Inventario
-                        </button>
-                        <div className="flex gap-2 items-center">
-                              {(userRole === 'admin' || userRole === 'oficina') && (
-                                <button onClick={() => setIsExpenseModalOpen(true)} className="flex items-center gap-2 bg-blue-600 text-white hover:bg-blue-700 text-xs font-bold px-4 py-2 rounded-xl transition-colors shadow-sm">
-                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" /></svg>
-                                  Registrar Gasto
-                                </button>
-                              )}
-                            </div>
-                      </div>
-
-                      {/* CONTENIDO 1: GASTOS GENERALES Y MATERIALES */}
-                      {expenseSubTab === 'generales' && (
-                        <>
-                          <div className="px-8 py-4 border-b border-slate-100 flex justify-between items-center bg-white">
-                            <p className="text-sm text-slate-500">Registro detallado de salidas, compras y gastos directos.</p>
-          
-                          </div>
-
-                          <table className="w-full text-left text-sm">
-                            <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
-                              <tr><th className="px-6 py-4">Fecha</th><th className="px-6 py-4">Concepto Detallado</th><th className="px-6 py-4">Clasificación</th><th className="px-6 py-4">Proveedor</th><th className="px-6 py-4 text-right">Cant.</th><th className="px-6 py-4 text-right">P. Unitario</th><th className="px-6 py-4 text-right">Importe</th></tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100 bg-white">
-                              {gastosGeneralesRecords.length === 0 ? (
-                                <tr><td colSpan={7} className="px-6 py-8 text-center text-slate-400">Aún no hay gastos registrados.</td></tr>
-                              ) : (
-                                gastosGeneralesRecords.map(r => (
-                                  <tr key={r.id} className="hover:bg-slate-50/80">
-                                    <td className="px-6 py-4 text-slate-600 whitespace-nowrap">{formatDate(r.fecha).split(',')[0]}</td>
-                                    <td className="px-6 py-4 text-slate-900 font-medium">{r.concepto}</td>
-                                    <td className="px-6 py-4 text-xs font-bold text-slate-600 uppercase"><span className="bg-slate-100 px-2 py-1 rounded">{r.tipo || 'Gastos Generales'}</span></td>
-                                    <td className="px-6 py-4 text-slate-700">{r.proveedor || 'S/P'}</td>
-                                    <td className="px-6 py-4 text-right text-slate-600">{r.cantidad ? `${r.cantidad} ${r.unidad || ''}` : '-'}</td>
-                                    <td className="px-6 py-4 text-right text-slate-600">{r.precio_unitario ? formatCurrency(r.precio_unitario) : '-'}</td>
-                                    <td className="px-6 py-4 text-red-600 font-bold text-right">-{formatCurrency(r.monto)}</td>
-                                  </tr>
-                                ))
-                              )}
-                            </tbody>
-                          </table>
-                        </>
-                      )}
-
-                      {/* CONTENIDO 2: CAJA CHICA */}
-                      {expenseSubTab === 'caja_chica' && (
-                        <>
-                          <div className="px-8 py-4 border-b border-slate-100 flex justify-between items-center bg-white">
-                            <p className="text-sm text-slate-500">Historial de tickets y control de viáticos generados desde campo.</p>
-                          </div>
-                          <table className="w-full text-left text-sm">
-                            <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
-                              <tr><th className="px-6 py-4">Fecha</th><th className="px-6 py-4">Encargado / Responsable</th><th className="px-6 py-4">Concepto</th><th className="px-6 py-4 text-right">Monto Declarado</th></tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100 bg-white">
-                              {cajaChicaRecords.length === 0 ? (
-                                <tr><td colSpan={4} className="px-6 py-8 text-center text-slate-400">No hay registros de caja chica.</td></tr>
-                              ) : (
-                                cajaChicaRecords.map(r => (
-                                  <tr key={r.id} className="hover:bg-slate-50/80">
-                                    <td className="px-6 py-4 text-slate-600">{formatDate(r.fecha).split(',')[0]}</td>
-                                    <td className="px-6 py-4 text-slate-900 font-medium">{r.encargado || 'N/A'}</td>
-                                    <td className="px-6 py-4 text-slate-600">{r.concepto || r.justificacion || 'Gastos menores'}</td>
-                                    <td className="px-6 py-4 text-red-600 font-bold text-right">-{formatCurrency(r.monto)}</td>
-                                  </tr>
-                                ))
-                              )}
-                            </tbody>
-                          </table>
-                        </>
-                      )}
-
-                      {/* CONTENIDO 3: MAQUINARIA */}
-                      {expenseSubTab === 'maquinaria' && (
-                        <>
-                          <div className="px-8 py-4 border-b border-slate-100 flex justify-between items-center bg-white">
-                            <p className="text-sm text-slate-500">Bitácora de rentas, anticipos y horas de uso de equipos.</p>
-                          </div>
-                          <table className="w-full text-left text-sm">
-                            <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
-                              <tr><th className="px-6 py-4">Fecha</th><th className="px-6 py-4">Equipo / Máquina</th><th className="px-6 py-4">Categoría</th><th className="px-6 py-4">Proveedor</th><th className="px-6 py-4 text-right">Importe</th></tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100 bg-white">
-                              {maquinariaRecords.filter(r => r.categoria !== 'config').length === 0 ? (
-                                <tr><td colSpan={5} className="px-6 py-8 text-center text-slate-400">Aún no hay horas reportadas ni anticipos.</td></tr>
-                              ) : (
-                                maquinariaRecords.filter(r => r.categoria !== 'config').map(r => (
-                                  <tr key={r.id} className="hover:bg-slate-50/80">
-                                    <td className="px-6 py-4 text-slate-600">{formatDate(r.fecha).split(',')[0]}</td>
-                                    <td className="px-6 py-4 text-slate-900 font-medium">
-                                      {r.equipo}
-                                      {r.asistencia_dias && <span className="block text-xs text-slate-500 mt-1">Uso: {r.asistencia_dias} hrs</span>}
-                                    </td>
-                                    <td className="px-6 py-4">
-                                      <span className={`text-[10px] font-bold px-2 py-1 rounded uppercase tracking-wider ${r.categoria === 'anticipo' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-                                        {r.categoria === 'anticipo' ? 'Anticipo / Abono' : 'Costo por Uso'}
-                                      </span>
-                                    </td>
-                                    <td className="px-6 py-4 text-slate-700">{r.proveedor || 'S/P'}</td>
-                                    <td className={`px-6 py-4 font-bold text-right ${r.categoria === 'anticipo' ? 'text-emerald-600' : 'text-red-600'}`}>
-                                      {r.categoria === 'anticipo' ? '+' : '-'}{formatCurrency(r.monto)}
-                                    </td>
-                                  </tr>
-                                ))
-                              )}
-                            </tbody>
-                          </table>
-                        </>
-                      )}
-{/* CONTENIDO 4: DESTAJOS E INVENTARIO */}
-{expenseSubTab === 'destajos' && (
-  <>
-    <div className="px-8 py-4 border-b border-slate-100 flex justify-between items-center bg-white">
-      <p className="text-sm text-slate-500">Registro de destajos, materiales en almacén y avances de obra.</p>
-    </div>
-    <table className="w-full text-left text-sm">
-      <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
-        <tr>
-          <th className="px-6 py-4">Fecha</th>
-          <th className="px-6 py-4">Concepto / Material</th>
-          <th className="px-6 py-4">Encargado / Recibe</th>
-          <th className="px-6 py-4">Solicitado Por</th>
-          <th className="px-6 py-4 text-right">Cantidad</th>
-          <th className="px-6 py-4 text-right">P. Unitario</th>
-          <th className="px-6 py-4 text-right">Total Acumulado</th>
-        </tr>
-      </thead>
-      <tbody className="divide-y divide-slate-100 bg-white">
-        {inventoryRecords.length === 0 ? (
-          <tr><td colSpan={7} className="px-6 py-8 text-center text-slate-400">Aún no hay destajos o inventario registrado.</td></tr>
-        ) : (
-          inventoryRecords.map((r, idx) => {
-            const cantidad = Number(r.cantidad || r.quantity || r.stock || 0);
-            const precioUnitario = Number(r.unit_price || r.precio || 0);
-            return (
-              <tr key={r.id || idx} className="hover:bg-slate-50/80">
-                <td className="px-6 py-4 text-slate-600 whitespace-nowrap">{formatDate(r.created_at || r.fecha).split(',')[0]}</td>
-                <td className="px-6 py-4 text-slate-900 font-medium">{r.name || r.concepto || r.nombre || 'Sin nombre'}</td>
-                
-                {/* 👤 COLUMNA ENCARGADO / RECIBE */}
-                <td className="px-6 py-4 text-slate-700">
-                  {r.in_charge ? (
-                    <span className="bg-slate-100 px-2.5 py-1 rounded-md text-xs font-semibold text-slate-700">
-                      👤 {r.in_charge}
-                    </span>
-                  ) : (
-                    <span className="text-slate-400 italic text-xs">No asignado</span>
-                  )}
-                </td>
-
-                {/* 📄 COLUMNA SOLICITADO POR */}
-                <td className="px-6 py-4 text-slate-700">
-                  {r.requested_by ? (
-                    <span className="bg-blue-50 border border-blue-100 px-2.5 py-1 rounded-md text-xs font-semibold text-blue-700">
-                      ✏️ {r.requested_by}
-                    </span>
-                  ) : (
-                    <span className="text-slate-400 italic text-xs">No especificado</span>
-                  )}
-                </td>
-
-                <td className="px-6 py-4 text-slate-600 text-right">
-                  {cantidad} <span className="text-xs text-slate-400 font-normal">{r.unidad || ''}</span>
-                </td>
-                <td className="px-6 py-4 text-slate-600 text-right">{formatCurrency(precioUnitario)}</td>
-                <td className="px-6 py-4 font-bold text-red-600 text-right">-{formatCurrency(cantidad * precioUnitario)}</td>
-              </tr>
-            );
-          })
-        )}
-      </tbody>
-    </table>
-  </>
-)}
-                    </div>
-                    
-                  )}
-
-                  {/* 👷‍♂️ PESTAÑA DE PERSONAL Y NÓMINAS */}
-                  {!loadingMetrics && activeTab === 'personal' && (
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 p-8 bg-slate-50/40">
-                      <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
-                        <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-white">
-                          <div>
-                            <h3 className="text-sm font-bold text-slate-800">Plantilla Activa en Obra</h3>
-                            <p className="text-xs text-slate-500">Directorio oficial de fuerza de trabajo asignada a este proyecto.</p>
-                          </div>
-                          
-                          <div className="flex gap-2 items-center">
-                            <button onClick={handleExportWorkersCSV} disabled={workersRecords.length === 0} className="bg-slate-100 text-slate-700 hover:bg-slate-200 px-3 py-2 rounded-xl text-xs font-bold transition-colors disabled:opacity-50">Excel</button>
-                            <button onClick={handleExportWorkersPDF} disabled={workersRecords.length === 0} className="bg-slate-900 text-white hover:bg-slate-800 px-3 py-2 rounded-xl text-xs font-bold transition-colors disabled:opacity-50">Imprimir Lista</button>
-                            
-                            {userRole === 'admin' && (
-                              <button onClick={() => setIsWorkerModalOpen(true)} className="ml-2 bg-blue-600 text-white text-xs font-bold px-3 py-2 rounded-xl hover:bg-blue-700 shadow-sm transition-colors">
-                                + Contratar
-                              </button>
-                            )}
-                          </div>
-                        </div>
-
-                        <table className="w-full text-left text-sm">
-                          <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
-                            <tr>
-                              <th className="px-6 py-3">Nombre Completo</th>
-                              <th className="px-6 py-3">Categoría / Puesto</th>
-                              <th className="px-6 py-3 text-right">Sueldo Base Semanal</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100">
-                            {workersRecords.length === 0 ? (
-                              <tr><td colSpan={3} className="px-6 py-8 text-center text-slate-400 text-xs">No hay personal registrado en esta obra.</td></tr>
-                            ) : (
-                              workersRecords.map(w => (
-                                <tr key={w.id} className="hover:bg-slate-50/50">
-                                  <td className="px-6 py-3.5 text-slate-900 font-medium">{w.name}</td>
-                                  <td className="px-6 py-3.5"><span className="bg-slate-100 text-slate-700 text-xs font-bold px-2 py-0.5 rounded uppercase">{w.role}</span></td>
-                                  <td className="px-6 py-3.5 text-slate-900 font-bold text-right">{formatCurrency(w.weekly_salary || 0)}</td>
-                                </tr>
-                              ))
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
-
-                      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
-                        <div className="px-6 py-4 border-b border-slate-100 bg-white">
-                          <h3 className="text-sm font-bold text-slate-800">Auditoría de Listas de Raya</h3>
-                          <p className="text-xs text-slate-500">Historial de nóminas y control de asistencia diario.</p>
-                        </div>
-                        
-                        <div className="divide-y divide-slate-100 overflow-y-auto max-h-[400px]">
-                          {payrollRecords.length === 0 ? (
-                            <div className="px-6 py-8 text-center text-slate-400 text-xs">Aún no hay reportes de nómina firmados en campo.</div>
-                          ) : (
-                            payrollRecords.map((p, idx) => {
-                              const trabajadorObj = workersRecords.find(w => w.id === p.worker_id);
-                              const nombreTrabajador = p.worker_name || p.nombre || trabajadorObj?.name || 'Trabajador no activo / Eliminado';
-                              const residenteObj = residents.find(r => r.id === p.residente_id);
-                              const nombreResidente = residenteObj?.full_name || 'Prueba anterior / No especificado';
-
-                              return (
-                                <div key={p.id || idx} className="p-4 hover:bg-slate-50 transition-colors flex justify-between items-start text-xs">
-                                  <div className="flex-1 mr-2">
-                                    <span className="font-bold text-slate-800 block text-sm">{formatCurrency(p.finally_salary || p.final_salary || 0)}</span>
-                                    <span className="text-slate-500 block mt-0.5">Fecha de Raya: {formatDate(p.created_at || p.fecha).split(',')[0]}</span>
-                                    {p.week_number && <span className="text-blue-600 font-semibold block mt-0.5">Semana No. {p.week_number}</span>}
-                                    
-                                    <div className="mt-2 mb-2">
-                                      {renderAttendanceDots(p.attendance)}
-                                      {(p.reason || p.motivo) && (
-                                        <div className="mt-1.5 bg-red-50 p-1.5 rounded border border-red-100">
-                                          <span className="text-red-700 font-bold text-[9px] block">Motivo Descuento:</span>
-                                          <span className="text-red-600 text-[10px] italic">{p.reason || p.motivo}</span>
-                                        </div>
-                                      )}
-                                    </div>
-
-                                    <div className="mt-2 bg-slate-100 p-2.5 rounded-lg border border-slate-200 space-y-1">
-                                      <span className="text-slate-700 block text-[11px]">👷‍♂️ <strong>Recibe:</strong> {nombreTrabajador}</span>
-                                      <span className="text-slate-600 block text-[11px]">👤 <strong>Reporta:</strong> {nombreResidente}</span>
-                                    </div>
-                                  </div>
-                                  <div className="text-right">
-                                    <span className="bg-emerald-50 text-emerald-700 font-bold px-2.5 py-1 rounded-lg border border-emerald-100 block uppercase tracking-wider text-[10px]">
-                                      Reportado
-                                    </span>
-                                  </div>
-                                </div>
-                              );
-                            })
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* 📖 TABLA DE BITÁCORA */}
-                  {!loadingMetrics && activeTab === 'bitacora' && (
-                    <div className="flex flex-col">
-                      <div className="print-hide px-8 py-4 border-b border-slate-100 flex justify-between items-center bg-white">
-                        <p className="text-sm text-slate-500">Historial operativo de la obra reportado desde campo.</p>
-                        <div className="flex gap-2">
-                          <button onClick={handleExportBitacoraCSV} disabled={bitacoraRecords.length === 0} className="flex items-center gap-2 bg-slate-100 text-slate-700 hover:bg-slate-200 text-sm font-bold px-4 py-2 rounded-xl transition-colors border border-slate-200 disabled:opacity-50 shadow-sm">Exportar Excel</button>
-                          <button onClick={handleExportBitacoraPDF} disabled={bitacoraRecords.length === 0} className="flex items-center gap-2 bg-slate-900 text-white hover:bg-slate-800 text-sm font-bold px-4 py-2 rounded-xl transition-colors disabled:opacity-50 shadow-sm"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-3a2 2 0 00-2-2H5a2 2 0 00-2 2v3a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg> Imprimir PDF</button>
-                        </div>
-                      </div>
-                      <table className="w-full text-left text-sm">
-                        <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold"><tr><th className="px-8 py-4 w-48">Fecha y Hora</th><th className="px-8 py-4 w-40">Categoría</th><th className="px-8 py-4">Descripción de Actividad</th></tr></thead>
-                        <tbody className="divide-y divide-slate-100">
-                          {bitacoraRecords.length === 0 ? (<tr><td colSpan={3} className="px-8 py-8 text-center text-slate-400">Aún no hay reportes en la bitácora.</td></tr>) : (
-                            bitacoraRecords.map(r => (
-                              <tr key={r.id} className="hover:bg-slate-50/80">
-                                <td className="px-8 py-4 text-slate-500 font-medium whitespace-nowrap align-top">{formatDate(r.created_at)}</td>
-                                <td className="px-8 py-4 align-top"><span className="bg-blue-50 text-blue-700 text-xs font-bold px-2.5 py-1 rounded-md border border-blue-100">{r.category || 'General'}</span></td>
-                                <td className="px-8 py-4 text-slate-800 leading-relaxed align-top">
-                                  <p className="mb-2">{r.description}</p>
-                                  {parsePhotos(r.photo_url).length > 0 && (
-                                    <div className="flex gap-2 flex-wrap mt-2">
-                                      {parsePhotos(r.photo_url).map((url: string, index: number) => (
-                                        <a key={index} href={url} target="_blank" rel="noreferrer" title="Ver imagen"><img src={url} alt="Evidencia" className="h-20 w-32 object-cover rounded-lg border border-slate-200 shadow-sm transition-transform hover:scale-105" /></a>
-                                      ))}
-                                    </div>
-                                  )}
-                                </td>
+                            {weeklySummaryData.map((week, idx) => (
+                              <tr key={idx} className="hover:bg-slate-50/80">
+                                <td className="px-6 py-4 font-medium text-slate-900">Semana del {week.startString}</td>
+                                <td className="px-6 py-4 text-right text-blue-600">{formatCurrency(week.nomina)}</td>
+                                <td className="px-6 py-4 text-right text-amber-600">{formatCurrency(week.destajos)}</td>
+                                <td className="px-6 py-4 text-right text-slate-600">{formatCurrency(week.gastos + week.caja)}</td>
+                                <td className="px-6 py-4 text-right font-bold text-red-600">-{formatCurrency(week.total)}</td>
                               </tr>
-                            ))
-                          )}
-                        </tbody>
-                      </table>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                   )}
 
-                  {/* 📐 PESTAÑA DE DOCUMENTOS */}
-                  {!loadingMetrics && activeTab === 'planos' && (
+                  {activeTab === 'caja' && (
                     <div className="flex flex-col">
-                      <div className="px-8 py-4 border-b border-slate-100 flex justify-between items-center bg-white">
-                        <p className="text-sm text-slate-500">Gestor documental de planos, permisos y archivos de ingeniería.</p>
-                        {userRole === 'admin' && (
-                          <button onClick={() => setIsPlanosModalOpen(true)} className="flex items-center gap-2 bg-blue-600 text-white hover:bg-blue-700 text-sm font-bold px-4 py-2 rounded-xl transition-colors shadow-sm">
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
-                            Subir Documento
-                          </button>
+                      <div className="px-8 py-4 border-b border-slate-200 bg-slate-50 flex gap-3 overflow-x-auto items-center justify-between">
+                        <div className="flex gap-2">
+                          <button onClick={() => setExpenseSubTab('generales')} className={`px-4 py-2 rounded-full text-xs font-bold border ${expenseSubTab === 'generales' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-slate-600'}`}>🧱 Materiales</button>
+                          <button onClick={() => setExpenseSubTab('caja_chica')} className={`px-4 py-2 rounded-full text-xs font-bold border ${expenseSubTab === 'caja_chica' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-slate-600'}`}>💵 Caja Chica</button>
+                          <button onClick={() => setExpenseSubTab('maquinaria')} className={`px-4 py-2 rounded-full text-xs font-bold border ${expenseSubTab === 'maquinaria' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-slate-600'}`}> Tractor Maquinaria</button>
+                          <button onClick={() => setExpenseSubTab('destajos')} className={`px-4 py-2 rounded-full text-xs font-bold border ${expenseSubTab === 'destajos' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-slate-600'}`}>🛠️ Destajos</button>
+                        </div>
+                        {(userRole === 'admin' || userRole === 'oficina') && (
+                          <button onClick={() => setIsExpenseModalOpen(true)} className="bg-blue-600 text-white text-xs font-bold px-4 py-2 rounded-xl shadow-sm">+ Registrar</button>
                         )}
                       </div>
 
-                      {/* 📑 SUBMENÚ TIPO PÍLDORAS PARA FILTRAR */}
-                      <div className="px-8 py-4 border-b border-slate-200 bg-slate-50 flex gap-3 overflow-x-auto items-center">
-                        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider mr-2">Filtro:</span>
-                        {['Todos', 'Planos', 'Permisos', 'Contratos', 'Otros'].map(cat => (
-                          <button 
-                            key={cat}
-                            onClick={() => setPlanoFilter(cat as any)} 
-                            className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all border ${planoFilter === cat ? 'bg-indigo-600 border-indigo-600 text-white shadow-md' : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-100'}`}
-                          >
-                            {cat}
-                          </button>
-                        ))}
+                      {/* RENDERS COMPACTOS DE SUBTABS GASTOS */}
+                      {expenseSubTab === 'generales' && (
+                        <table className="w-full text-left text-sm">
+                          <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
+                            <tr><th className="px-6 py-4">Fecha</th><th className="px-6 py-4">Concepto</th><th className="px-6 py-4">Proveedor</th><th className="px-6 py-4 text-right">Importe</th></tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 bg-white">
+                            {gastosGeneralesRecords.map(r => (
+                              <tr key={r.id}>
+                                <td className="px-6 py-4 text-slate-600">{formatDate(r.fecha)}</td>
+                                <td className="px-6 py-4 text-slate-900 font-medium">{r.concepto}</td>
+                                <td className="px-6 py-4 text-slate-700">{r.proveedor || 'S/P'}</td>
+                                <td className="px-6 py-4 text-red-600 font-bold text-right">-{formatCurrency(r.monto)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+
+                      {expenseSubTab === 'caja_chica' && (
+                        <table className="w-full text-left text-sm">
+                          <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
+                            <tr><th className="px-6 py-4">Fecha</th><th className="px-6 py-4">Responsable</th><th className="px-6 py-4">Concepto</th><th className="px-6 py-4 text-right">Monto</th></tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 bg-white">
+                            {cajaChicaRecords.map(r => (
+                              <tr key={r.id}>
+                                <td className="px-6 py-4 text-slate-600">{formatDate(r.fecha)}</td>
+                                <td className="px-6 py-4 font-medium text-slate-900">{r.encargado}</td>
+                                <td className="px-6 py-4 text-slate-600">{r.concepto || 'Gastos menores'}</td>
+                                <td className="px-6 py-4 text-red-600 font-bold text-right">-{formatCurrency(r.monto)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+
+                      {expenseSubTab === 'maquinaria' && (
+                        <table className="w-full text-left text-sm">
+                          <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
+                            <tr><th className="px-6 py-4">Fecha</th><th className="px-6 py-4">Equipo</th><th className="px-6 py-4">Proveedor</th><th className="px-6 py-4 text-right">Importe</th></tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 bg-white">
+                            {maquinariaRecords.map(r => (
+                              <tr key={r.id}>
+                                <td className="px-6 py-4 text-slate-600">{formatDate(r.fecha)}</td>
+                                <td className="px-6 py-4 text-slate-900 font-medium">{r.equipo} {r.asistencia_dias && `(${r.asistencia_dias} hrs)`}</td>
+                                <td className="px-6 py-4 text-slate-700">{r.proveedor || 'S/P'}</td>
+                                <td className="px-6 py-4 text-red-600 font-bold text-right">-{formatCurrency(r.monto)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+
+                      {expenseSubTab === 'destajos' && (
+                        <table className="w-full text-left text-sm">
+                          <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
+                            <tr><th className="px-6 py-4">Fecha</th><th className="px-6 py-4">Concepto / Material</th><th className="px-6 py-4">Encargado / Recibe</th><th className="px-6 py-4">Solicitado Por</th><th className="px-6 py-4 text-right">Cantidad</th><th className="px-6 py-4 text-right">Total</th></tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 bg-white">
+                            {inventoryRecords.map((r, idx) => (
+                              <tr key={r.id || idx} className="hover:bg-slate-50/80">
+                                <td className="px-6 py-4 text-slate-600">{formatDate(r.created_at || r.fecha).split(',')[0]}</td>
+                                <td className="px-6 py-4 text-slate-900 font-medium">{r.item_name || 'Sin nombre'}</td>
+                                <td className="px-6 py-4 text-slate-700">
+                                  {r.encargado_recibe ? <span className="bg-slate-100 px-2 py-1 rounded text-xs font-semibold">👤 {r.encargado_recibe}</span> : <span className="text-slate-400 italic text-xs">No asignado</span>}
+                                </td>
+                                <td className="px-6 py-4 text-slate-700">
+                                  {r.solicitado_por ? <span className="bg-blue-50 border border-blue-100 px-2 py-1 rounded text-xs font-semibold text-blue-700">✏️ {r.solicitado_por}</span> : <span className="text-slate-400 italic text-xs">No especificado</span>}
+                                </td>
+                                <td className="px-6 py-4 text-right">{r.cantidad} {r.unidad || ''}</td>
+                                <td className="px-6 py-4 font-bold text-red-600 text-right">-{formatCurrency(Number(r.cantidad || 0) * Number(r.unit_price || 0))}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  )}
+
+                  {/* 🟢 RENDERING DE ASISTENCIA (PORT EN FRONTIER COMPACTADO) */}
+                  {!loadingMetrics && activeTab === 'personal' && (
+                    <div className="flex flex-col space-y-6 p-8 bg-slate-50/30 w-full">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="bg-slate-900 text-white rounded-2xl p-6 shadow-sm flex flex-col justify-center">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Gasto en Raya Acumulado (En Pantalla)</span>
+                          <span className="text-3xl font-black text-emerald-400 tracking-tight mt-1 font-mono">{formatCurrency(totalHistoricoRaya)}</span>
+                        </div>
+                        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm flex items-center justify-between">
+                          <div><h4 className="text-sm font-bold text-slate-800">Listas de Raya Emitidas</h4><p className="text-xs text-slate-500 mt-0.5">Semanas auditadas en campo.</p></div>
+                          <div className="bg-blue-50 text-blue-600 rounded-xl px-4 py-2.5 font-mono font-black text-xl border border-blue-100">{registrosAgrupadosPorSemana.length} Sem.</div>
+                        </div>
                       </div>
 
-                      <table className="w-full text-left text-sm">
-                        <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
-                          <tr><th className="px-8 py-4">Nombre del Documento</th><th className="px-8 py-4 w-32">Categoría</th><th className="px-8 py-4 w-32">Versión</th><th className="px-8 py-4 w-48">Fecha de Subida</th><th className="px-8 py-4 w-32 text-center">Acción</th></tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100 bg-white">
-                          {planosRecords.filter(p => planoFilter === 'Todos' || p.categoria === planoFilter).length === 0 ? (
-                            <tr><td colSpan={5} className="px-8 py-8 text-center text-slate-400">No hay documentos en esta categoría.</td></tr>
-                          ) : (
-                            planosRecords.filter(p => planoFilter === 'Todos' || p.categoria === planoFilter).map(p => (
-                              <tr key={p.id} className="hover:bg-slate-50/80">
-                                <td className="px-8 py-4 text-slate-900 font-medium">{p.name}</td>
-                                <td className="px-8 py-4">
-                                  <span className="bg-slate-100 text-slate-600 text-[10px] font-bold px-2.5 py-1 rounded border border-slate-200 uppercase tracking-wider">{p.categoria || 'Planos'}</span>
-                                </td>
-                                <td className="px-8 py-4"><span className="bg-indigo-50 text-indigo-700 text-[10px] font-bold px-2.5 py-1 rounded-md border border-indigo-100 uppercase tracking-wider">{p.version}</span></td>
-                                <td className="px-8 py-4 text-slate-500">{formatDate(p.created_at).split(',')[0]}</td>
-                                <td className="px-8 py-4 text-center">
-                                  <a href={p.file_url} target="_blank" rel="noreferrer" className="inline-block bg-slate-900 text-white text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-slate-800 transition-colors shadow-sm">Ver Archivo</a>
-                                </td>
-                              </tr>
-                            ))
-                          )}
-                        </tbody>
-                      </table>
+                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
+                        <div className="lg:col-span-2 space-y-4">
+                          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+                            <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+                              <div><h3 className="text-sm font-bold text-slate-800">Historial Agrupado por Semanas</h3><p className="text-xs text-slate-500 mt-0.5">Haz clic en cualquier bloque para abrir el desglose.</p></div>
+                              <div className="flex gap-2">
+                                <button onClick={handleExportWorkersCSV} disabled={workersRecords.length === 0} className="bg-slate-100 text-slate-700 px-3 py-1.5 rounded-xl text-xs font-bold border border-slate-200">Exportar Raya</button>
+                                <button onClick={handleExportWorkersPDF} disabled={workersRecords.length === 0} className="bg-slate-900 text-white px-3 py-1.5 rounded-xl text-xs font-bold">Imprimir PDF</button>
+                              </div>
+                            </div>
+
+                            <div className="p-6 space-y-4">
+                              {registrosAgrupadosPorSemana.length === 0 ? (
+                                <div className="text-center py-12 text-slate-400 italic text-sm font-medium bg-slate-50 rounded-xl border border-dashed border-slate-200">No hay reportes de nómina o asistencia registrados para esta obra.</div>
+                              ) : (
+                                registrosAgrupadosPorSemana.map((bloque, idx) => (
+                                  <details key={idx} className="group border border-slate-200 rounded-xl bg-white shadow-sm open:shadow-md transition-all duration-200">
+                                    <summary className="list-none flex items-center justify-between p-4 font-semibold text-sm text-slate-800 cursor-pointer hover:bg-slate-50 select-none">
+                                      <div className="flex items-center gap-3">
+                                        <span className="transition-transform duration-200 group-open:rotate-90 text-slate-400 text-xs">▶</span>
+                                        <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+                                        <span className="font-bold text-slate-900">{bloque.numeroSemana}</span>
+                                      </div>
+                                      <div className="flex items-center gap-4">
+                                        <span className="text-xs bg-slate-100 text-slate-600 font-bold px-2.5 py-1 rounded-md">{bloque.registros.length} trabajadores</span>
+                                        <span className="text-sm font-mono font-black text-red-600">-{formatCurrency(bloque.subtotalSemana)}</span>
+                                      </div>
+                                    </summary>
+
+                                    <div className="border-t border-slate-100 bg-slate-50/40 overflow-hidden">
+                                      <table className="w-full text-left text-xs">
+                                        <thead className="bg-slate-100 text-slate-600 font-bold uppercase text-[10px] border-b border-slate-200">
+                                          <tr><th className="px-4 py-2.5">Trabajador</th><th className="px-4 py-2.5 text-center">Asistencia Semanal</th><th className="px-4 py-2.5">Notas / Deducciones</th><th className="px-4 py-2.5 text-right">Importe Neto Pagado</th></tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100 bg-white">
+                                          {bloque.registros.map((p, rIdx) => {
+                                            const trabajadorObj = workersRecords.find(w => w.id === p.worker_id);
+                                            const nombreTrabajador = trabajadorObj?.name_worker || trabajadorObj?.name || 'Personal Inactivo';
+                                            const rolTrabajador = p.role || trabajadorObj?.role || 'Obrero';
+                                            
+                                            return (
+                                              <tr key={rIdx} className="hover:bg-slate-50/50">
+                                                <td className="px-4 py-3 align-middle"><span className="font-bold text-slate-900 block">{nombreTrabajador}</span><span className="text-slate-400 text-[10px] block mt-0.5 uppercase font-medium">{rolTrabajador}</span></td>
+                                                <td className="px-4 py-3 text-center align-middle flex justify-center">{renderAttendanceDots(p.attendance)}</td>
+                                                <td className="px-4 py-3 align-middle text-slate-600 max-w-[200px] truncate">
+                                                  {p.deduction_reason || p.reason ? <span className="text-red-600 bg-red-50 px-2 py-0.5 rounded border border-red-100 font-medium text-[10px]">⚠ {p.deduction_reason || p.reason}</span> : <span className="text-slate-400 italic text-[11px]">Ninguna</span>}
+                                                </td>
+                                                <td className="px-4 py-3 text-right align-middle font-bold text-slate-800 font-mono">{formatCurrency(p.final_salary || 0)}</td>
+                                              </tr>
+                                            );
+                                          })}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  </details>
+                                ))
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+                          <div className="px-6 py-4 border-b border-slate-100 bg-white flex justify-between items-center">
+                            <div><h3 className="text-sm font-bold text-slate-800">Plantilla Oficial</h3><p className="text-[11px] text-slate-400 mt-0.5">Personal activo asignado.</p></div>
+                            {userRole === 'admin' && (<button onClick={() => setIsWorkerModalOpen(true)} className="bg-blue-600 text-white text-[11px] font-black px-3 py-1.5 rounded-xl hover:bg-blue-700 shadow-sm uppercase tracking-wider">+ Alta</button>)}
+                          </div>
+                          
+                          <div className="divide-y divide-slate-100 overflow-y-auto max-h-[500px]">
+                            {workersRecords.map((w) => (
+                              <div key={w.id} className="p-4 hover:bg-slate-50 transition-colors flex justify-between items-center text-xs">
+                                <div><span className="font-bold text-slate-800 block text-sm">{w.name_worker || w.name}</span><span className="text-slate-400 font-semibold uppercase text-[10px] block mt-0.5">{w.role}</span></div>
+                                <div className="text-right"><span className="font-mono font-black text-slate-900 block">{formatCurrency(w.weekly_salary || 0)}</span><span className="text-[9px] text-slate-400 block mt-0.5 uppercase tracking-wide">Base Semanal</span></div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
                     </div>
+                  )}
+
+                  {/* RESTO DE RENDERS DE BITACORA Y PLANOS */}
+                  {!loadingMetrics && activeTab === 'bitacora' && (
+                    <table className="w-full text-left text-sm">
+                      <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold"><tr><th className="px-8 py-4 w-48">Fecha y Hora</th><th className="px-8 py-4 w-40">Categoría</th><th className="px-8 py-4">Descripción de Actividad</th></tr></thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {bitacoraRecords.map(r => (
+                          <tr key={r.id}>
+                            <td className="px-8 py-4 text-slate-500 font-medium whitespace-nowrap align-top">{formatDate(r.created_at)}</td>
+                            <td className="px-8 py-4 align-top"><span className="bg-blue-50 text-blue-700 text-xs font-bold px-2.5 py-1 rounded-md border border-blue-100">{r.category || 'General'}</span></td>
+                            <td className="px-8 py-4 text-slate-800 leading-relaxed align-top">
+                              <p className="mb-2">{r.description}</p>
+                              {parsePhotos(r.photo_url).length > 0 && (
+                                <div className="flex gap-2 flex-wrap mt-2">
+                                  {parsePhotos(r.photo_url).map((url: string, index: number) => (
+                                    <a key={index} href={url} target="_blank" rel="noreferrer" title="Ver imagen"><img src={url} alt="Evidencia" className="h-20 w-32 object-cover rounded-lg border border-slate-200" /></a>
+                                  ))}
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+
+                  {!loadingMetrics && activeTab === 'planos' && (
+                    <table className="w-full text-left text-sm">
+                      <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
+                        <tr><th className="px-8 py-4">Nombre del Documento</th><th className="px-8 py-4 w-32">Categoría</th><th className="px-8 py-4 w-32">Versión</th><th className="px-8 py-4 w-48">Fecha de Subida</th><th className="px-8 py-4 w-32 text-center">Acción</th></tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 bg-white">
+                        {planosRecords.filter(p => planoFilter === 'Todos' || p.categoria === planoFilter).map(p => (
+                          <tr key={p.id} className="hover:bg-slate-50/80">
+                            <td className="px-8 py-4 text-slate-900 font-medium">{p.name}</td>
+                            <td className="px-8 py-4"><span className="bg-slate-100 text-slate-600 text-[10px] font-bold px-2.5 py-1 rounded border border-slate-200 uppercase tracking-wider">{p.categoria || 'Planos'}</span></td>
+                            <td className="px-8 py-4"><span className="bg-indigo-50 text-indigo-700 text-[10px] font-bold px-2.5 py-1 rounded-md border border-indigo-100 uppercase tracking-wider">{p.version}</span></td>
+                            <td className="px-8 py-4 text-slate-500">{formatDate(p.created_at).split(',')[0]}</td>
+                            <td className="px-8 py-4 text-center"><a href={p.file_url} target="_blank" rel="noreferrer" className="bg-slate-900 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-sm">Ver Archivo</a></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   )}
 
                 </div>
               </div>
-
             </div>
           ) : (
             <div className="text-center mt-20 text-slate-500">Selecciona una obra en el menú.</div>
@@ -1406,369 +1209,206 @@ const handleFinalizarObra = async () => {
         </main>
       </div>
 
-      {/* 🧾 MODAL DE GASTOS ADAPTATIVO HOMOLOGADO */}
-{isExpenseModalOpen && (
-  <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
-    <div className="bg-white rounded-2xl shadow-xl w-full max-w-xl overflow-hidden max-h-[90vh] flex flex-col">
-      
-      {/* CABECERA */}
-      <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50 shrink-0">
-        <h3 className="text-base font-bold text-slate-900">
-          {expenseSubTab === 'generales' && '🧱 Nuevo Registro - Gastos Estructurales'}
-          {expenseSubTab === 'caja_chica' && '➕ Nuevo Movimiento - Libro Mayor de Caja'}
-          {expenseSubTab === 'maquinaria' && '🚜 Alta e Importe de Maquinaria'}
-          {expenseSubTab === 'destajos' && '🛠️ Registro de Destajo / Inventario'}
-        </h3>
-        <button onClick={() => setIsExpenseModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
-      </div>
-      
-      {/* CUERPO FORMULARIO SCROLLABLE */}
-      <form onSubmit={handleSaveGasto} className="p-6 space-y-5 overflow-y-auto flex-1">
-        {expenseFormError && <div className="p-3 bg-red-50 text-red-600 text-xs rounded-xl border border-red-100">{expenseFormError}</div>}
-        
-        {/* FECHA COMÚN */}
-        <div className="w-full">
-          <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Fecha de Operación</label>
-          <input type="date" required value={fechaGasto} onChange={(e) => setFechaGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-900 text-sm focus:border-blue-500 font-medium focus:outline-none" />
-        </div>
-
-        {/* ---------------- VISTA 1: GASTOS GENERALES Y MATERIALES ---------------- */}
-        {expenseSubTab === 'generales' && (
-          <div className="space-y-4">
-            {/* Fila Clasificación del Rubro */}
-            <div>
-              <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Clasificación del Rubro</label>
-              <div className="grid grid-cols-4 gap-2">
-                {['Material', 'Admin', 'Burócrata', 'Asesoría'].map((rubro) => (
-                  <button type="button" key={rubro} onClick={() => setRubroClasificacion(rubro)} className={`py-2 text-xs font-bold rounded-xl border transition-all ${rubroClasificacion === rubro ? 'bg-amber-500 border-amber-500 text-white shadow-sm' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>{rubro}</button>
-                ))}
+      {/* MODALS EXISTENTES DE TU CORE (GASTOS, ALTA DE TRABAJADOR, PLANO, NUEVA OBRA Y CIERRE) */}
+      {isExpenseModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-xl overflow-hidden max-h-[90vh] flex flex-col">
+            <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50 shrink-0">
+              <h3 className="text-base font-bold text-slate-900">
+                {expenseSubTab === 'generales' && '🧱 Nuevo Registro - Gastos Estructurales'}
+                {expenseSubTab === 'caja_chica' && '➕ Nuevo Movimiento - Libro Mayor de Caja'}
+                {expenseSubTab === 'maquinaria' && '🚜 Alta e Importe de Maquinaria'}
+                {expenseSubTab === 'destajos' && '🛠️ Registro de Destajo / Inventario'}
+              </h3>
+              <button onClick={() => setIsExpenseModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
+            </div>
+            
+            <form onSubmit={handleSaveGasto} className="p-6 space-y-5 overflow-y-auto flex-1">
+              {expenseFormError && <div className="p-3 bg-red-50 text-red-600 text-xs rounded-xl border border-red-100">{expenseFormError}</div>}
+              
+              <div className="w-full">
+                <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Fecha de Operación</label>
+                <input type="date" required value={fechaGasto} onChange={(e) => setFechaGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-900 text-sm focus:border-blue-500 font-medium focus:outline-none" />
               </div>
-            </div>
 
-            {/* Fila Estado de Pago */}
-            <div>
-              <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Estado de Pago</label>
-              <div className="grid grid-cols-3 gap-2">
-                {['Liquidado', 'Abono', 'Por Pagar'].map((estado) => (
-                  <button type="button" key={estado} onClick={() => setEstadoPago(estado)} className={`py-2 text-xs font-bold rounded-xl border transition-all ${estadoPago === estado ? 'bg-emerald-500 border-emerald-500 text-white shadow-sm' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>{estado}</button>
-                ))}
+              {expenseSubTab === 'generales' && (
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Clasificación del Rubro</label>
+                    <div className="grid grid-cols-4 gap-2">
+                      {['Material', 'Admin', 'Burócrata', 'Asesoría'].map((rubro) => (
+                        <button type="button" key={rubro} onClick={() => setRubroClasificacion(rubro)} className={`py-2 text-xs font-bold rounded-xl border transition-all ${rubroClasificacion === rubro ? 'bg-amber-500 border-amber-500 text-white shadow-sm' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>{rubro}</button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Estado de Pago</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {['Liquidado', 'Abono', 'Por Pagar'].map((estado) => (
+                        <button type="button" key={estado} onClick={() => setEstadoPago(estado)} className={`py-2 text-xs font-bold rounded-xl border transition-all ${estadoPago === estado ? 'bg-emerald-500 border-emerald-500 text-white shadow-sm' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>{estado}</button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Concepto o Descripción</label><input type="text" required placeholder="Ej. Varilla de 3/8..." value={conceptoGasto} onChange={(e) => setConceptoGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
+                    <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Proveedor de Materiales</label><input type="text" placeholder="Nombre o Razón social..." value={proveedorGasto} onChange={(e) => setProveedorGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-4">
+                    <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Unidad de Medida</label><input type="text" placeholder="Ej. Pzas / Ton" value={unidadGasto} onChange={(e) => setUnidadGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
+                    <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Cantidad</label><input type="number" step="any" placeholder="1" value={cantidadGasto} onChange={(e) => setCantidadGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
+                    <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Precio Unitario ($)</label><input type="number" step="0.01" placeholder="0.00" value={precioUnitarioGasto} onChange={(e) => setPrecioUnitarioGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
+                  </div>
+                  <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Número de Cotización (Opcional)</label><input type="text" placeholder="Ej. COT-OBRA-023" value={numCotizacion} onChange={(e) => setNumCotizacion(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
+                </div>
+              )}
+
+              {expenseSubTab === 'caja_chica' && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">No. Nota / Ticket</label><input type="text" placeholder="Opcional" value={numNota} onChange={(e) => setNumNota(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
+                    <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Responsable</label><input type="text" placeholder="Nombre de quien gasta..." value={responsableGasto} onChange={(e) => setResponsableGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
+                  </div>
+                  <div className="border border-dashed border-slate-200 rounded-xl p-4 bg-slate-50/50 space-y-3">
+                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Artículo Adquirido</span>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                      <div className="md:col-span-2"><input type="text" required placeholder="Concepto" value={conceptoGasto} onChange={(e) => setConceptoGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-900 font-medium" /></div>
+                      <div><input type="number" required placeholder="P.U ($)" value={precioUnitarioGasto} onChange={(e) => setPrecioUnitarioGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-900 font-medium" /></div>
+                    </div>
+                    <input type="number" placeholder="Cantidad" value={cantidadGasto} onChange={(e) => setCantidadGasto(e.target.value)} className="w-32 rounded-xl border border-slate-200 px-3 py-1.5 text-xs text-slate-900 font-medium" />
+                  </div>
+                  <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Nota / Justificación Adicional</label><textarea rows={2} placeholder="Ej. Compra urgente..." value={justificacionCaja} onChange={(e) => setJustificacionCaja(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
+                </div>
+              )}
+
+              {expenseSubTab === 'maquinaria' && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Nombre del Equipo</label><input type="text" required placeholder="Ej. Retroexcavadora..." value={nombreEquipo} onChange={(e) => setNombreEquipo(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
+                    <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Proveedor de Renta</label><input type="text" placeholder="Proveedor..." value={proveedorGasto} onChange={(e) => setProveedorGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Tarifa por HORA ($)</label><input type="number" required placeholder="Ej. 1200" value={precioUnitarioGasto} onChange={(e) => setPrecioUnitarioGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
+                    <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Horas Utilizadas esta Semana</label><input type="number" required placeholder="Ej. 10" value={cantidadGasto} onChange={(e) => setCantidadGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
+                  </div>
+                </div>
+              )}
+
+              {expenseSubTab === 'destajos' && (
+                <div className="space-y-4">
+                  <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Concepto / Actividad</label><input type="text" required placeholder="Ej. Cemento..." value={conceptoGasto} onChange={(e) => setConceptoGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Unidad</label><input type="text" placeholder="Ej. Bulto" value={unidadGasto} onChange={(e) => setUnidadGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900" /></div>
+                    <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">P.U / Mano de Obra ($)</label><input type="number" required placeholder="Ej. 250" value={precioUnitarioGasto} onChange={(e) => setPrecioUnitarioGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900" /></div>
+                  </div>
+                  <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Vol. / Cant. (Para esta semana)</label><input type="number" required placeholder="Ej. 10" value={cantidadGasto} onChange={(e) => setCantidadGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900" /></div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Encargado / Recibe (Opcional)</label>
+                    <input type="text" placeholder="Nombre..." value={encargadoRecibeDestajo} onChange={(e) => setEncargadoRecibeDestajo(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 mb-2" />
+                    <div className="flex gap-2 flex-wrap max-h-24 overflow-y-auto p-1 bg-slate-50 rounded-lg">
+                      {workersRecords.map((worker) => (
+                        <button type="button" key={`recibe-${worker.id}`} onClick={() => setEncargadoRecibeDestajo(worker.name_worker || worker.name)} className={`px-3 py-1 rounded-full text-xs font-semibold border ${encargadoRecibeDestajo === (worker.name_worker || worker.name) ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white text-slate-600'}`}>{worker.name_worker || worker.name}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Solicitado por (Opcional)</label>
+                    <input type="text" placeholder="Nombre..." value={solicitadoPorDestajo} onChange={(e) => setSolicitadoPorDestajo(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 mb-2" />
+                    <div className="flex gap-2 flex-wrap max-h-24 overflow-y-auto p-1 bg-slate-50 rounded-lg">
+                      {workersRecords.map((worker) => (
+                        <button type="button" key={`pide-${worker.id}`} onClick={() => setSolicitadoPorDestajo(worker.name_worker || worker.name)} className={`px-3 py-1 rounded-full text-xs font-semibold border ${solicitadoPorDestajo === (worker.name_worker || worker.name) ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white text-slate-600'}`}>{worker.name_worker || worker.name}</button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="bg-slate-900 text-white rounded-xl p-4 mt-4 shrink-0 flex justify-between items-center">
+                <span className="text-xs font-bold text-slate-400 uppercase">Importe Total Calculado:</span>
+                <span className="text-xl font-black text-emerald-400">{montoGasto ? formatCurrency(parseFloat(montoGasto)) : '$0.00'}</span>
               </div>
-            </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Concepto o Descripción</label><input type="text" required placeholder="Ej. Varilla de 3/8..." value={conceptoGasto} onChange={(e) => setConceptoGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
-              <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Proveedor de Materiales</label><input type="text" placeholder="Nombre o Razón social..." value={proveedorGasto} onChange={(e) => setProveedorGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
-            </div>
-
-            <div className="grid grid-cols-3 gap-4">
-              <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Unidad de Medida</label><input type="text" placeholder="Ej. Pzas / Ton" value={unidadGasto} onChange={(e) => setUnidadGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
-              <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Cantidad</label><input type="number" step="any" placeholder="1" value={cantidadGasto} onChange={(e) => setCantidadGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
-              <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Precio Unitario ($)</label><input type="number" step="0.01" placeholder="0.00" value={precioUnitarioGasto} onChange={(e) => setPrecioUnitarioGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
-            </div>
-
-            <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Número de Cotización (Opcional)</label><input type="text" placeholder="Ej. COT-OBRA-023" value={numCotizacion} onChange={(e) => setNumCotizacion(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
-          </div>
-        )}
-
-        {/* ---------------- VISTA 2: LIBRO MAYOR DE CAJA CHICA ---------------- */}
-        {expenseSubTab === 'caja_chica' && (
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">No. Nota / Ticket</label><input type="text" placeholder="Opcional" value={numNota} onChange={(e) => setNumNota(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
-              <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Responsable</label><input type="text" placeholder="Nombre de quien gasta..." value={responsableGasto} onChange={(e) => setResponsableGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
-            </div>
-
-            <div className="border border-dashed border-slate-200 rounded-xl p-4 bg-slate-50/50 space-y-3">
-              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Artículo Adquirido</span>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                <div className="md:col-span-2"><input type="text" required placeholder="Concepto (Ej. Clavos 2 pulg)" value={conceptoGasto} onChange={(e) => setConceptoGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs focus:outline-none focus:border-blue-500 text-slate-900 font-medium" /></div>
-                <div><input type="number" required placeholder="P.U ($)" value={precioUnitarioGasto} onChange={(e) => setPrecioUnitarioGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs focus:outline-none focus:border-blue-500 text-slate-900 font-medium" /></div>
+              <div className="pt-4 flex justify-end gap-3 border-t border-slate-100 mt-6 shrink-0">
+                <button type="button" onClick={() => setIsExpenseModalOpen(false)} className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 rounded-xl">Cancelar</button>
+                <button type="submit" disabled={loadingExpenseForm || !montoGasto} className="bg-blue-600 text-white text-sm font-bold px-6 py-2 rounded-xl shadow-sm hover:bg-blue-700">Confirmar e Insertar</button>
               </div>
-              <input type="number" placeholder="Cantidad (Defecto 1)" value={cantidadGasto} onChange={(e) => setCantidadGasto(e.target.value)} className="w-32 rounded-xl border border-slate-200 px-3 py-1.5 text-xs focus:outline-none focus:border-blue-500 text-slate-900 font-medium" />
-            </div>
-
-            <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Nota / Justificación Adicional</label><textarea rows={2} placeholder="Ej. Compra urgente para loza..." value={justificacionCaja} onChange={(e) => setJustificacionCaja(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
-          </div>
-        )}
-
-        {/* ---------------- VISTA 3: MAQUINARIA Y EQUIPO ---------------- */}
-        {expenseSubTab === 'maquinaria' && (
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Nombre del Equipo</label><input type="text" required placeholder="Ej. Retroexcavadora CAT 320" value={nombreEquipo} onChange={(e) => setNombreEquipo(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
-              <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Proveedor de Renta</label><input type="text" placeholder="Ej. Arrendadora del Centro" value={proveedorGasto} onChange={(e) => setProveedorGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
-            </div>
-
-            <div>
-              <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Corte de Facturación / Modalidad</label>
-              <div className="flex gap-2">
-                {['Por Día', 'Por Semana', 'Por Mes'].map((mod) => (
-                  <button type="button" key={mod} onClick={() => setModalidadFacturacion(mod)} className={`px-4 py-1.5 rounded-full text-xs font-bold border transition-all ${modalidadFacturacion === mod ? 'bg-blue-600 border-blue-600 text-white' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>{mod}</button>
-                ))}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Tarifa por HORA ($)</label><input type="number" required placeholder="Ej. 1200" value={precioUnitarioGasto} onChange={(e) => setPrecioUnitarioGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
-              <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Horas Utilizadas esta Semana</label><input type="number" required placeholder="Ej. 10" value={cantidadGasto} onChange={(e) => setCantidadGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
-            </div>
-          </div>
-        )}
-
-{/* ---------------- VISTA 4: DESTAJOS E INVENTARIO (DINÁMICO CON TU PERSONAL) ---------------- */}
-{expenseSubTab === 'destajos' && (
-  <div className="space-y-4">
-    {/* Concepto / Actividad */}
-    <div>
-      <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Concepto / Actividad</label>
-      <input type="text" required placeholder="Ej. Cemento Cruz Azul 50kg" value={conceptoGasto} onChange={(e) => setConceptoGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" />
-    </div>
-    
-    {/* Unidad y P.U */}
-    <div className="grid grid-cols-2 gap-4">
-      <div>
-        <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Unidad</label>
-        <input type="text" placeholder="Ej. Bulto" value={unidadGasto} onChange={(e) => setUnidadGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" />
-      </div>
-      <div>
-        <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">P.U / Mano de Obra ($)</label>
-        <input type="number" required placeholder="Ej. 250" value={precioUnitarioGasto} onChange={(e) => setPrecioUnitarioGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" />
-      </div>
-    </div>
-
-    {/* Volumen / Cantidad */}
-    <div>
-      <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Vol. / Cant. (Para esta semana)</label>
-      <input type="number" required placeholder="Ej. 10" value={cantidadGasto} onChange={(e) => setCantidadGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" />
-    </div>
-
-    {/* Encargado / Recibe (Dinámico de la lista de trabajadores) */}
-    <div>
-      <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Encargado / Recibe (Opcional)</label>
-      <input type="text" placeholder="Nombre del responsable..." value={encargadoRecibeDestajo} onChange={(e) => setEncargadoRecibeDestajo(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium mb-2" />
-      
-      <div className="flex gap-2 flex-wrap max-h-24 overflow-y-auto p-1 bg-slate-50 rounded-lg">
-        {workersRecords.length === 0 ? (
-          <span className="text-[11px] text-slate-400 italic p-1">No hay personal registrado en esta obra para seleccionar rápidamente.</span>
-        ) : (
-          workersRecords.map((worker) => (
-            <button 
-              type="button" 
-              key={`recibe-${worker.id}`} 
-              onClick={() => setEncargadoRecibeDestajo(worker.name)} 
-              className={`px-3 py-1 rounded-full text-xs font-semibold border transition-all truncate max-w-[150px] ${encargadoRecibeDestajo === worker.name ? 'bg-blue-600 border-blue-600 text-white shadow-sm' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'}`}
-            >
-              {worker.name}
-            </button>
-          ))
-        )}
-      </div>
-    </div>
-
-    {/* Solicitado por (Dinámico de la lista de trabajadores) */}
-    <div>
-      <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Solicitado por (Opcional)</label>
-      <input type="text" placeholder="Quién pide el material..." value={solicitadoPorDestajo} onChange={(e) => setSolicitadoPorDestajo(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium mb-2" />
-      
-      <div className="flex gap-2 flex-wrap max-h-24 overflow-y-auto p-1 bg-slate-50 rounded-lg">
-        {workersRecords.length === 0 ? (
-          <span className="text-[11px] text-slate-400 italic p-1">No hay personal registrado en esta obra para seleccionar rápidamente.</span>
-        ) : (
-          workersRecords.map((worker) => (
-            <button 
-              type="button" 
-              key={`pide-${worker.id}`} 
-              onClick={() => setSolicitadoPorDestajo(worker.name)} 
-              className={`px-3 py-1 rounded-full text-xs font-semibold border transition-all truncate max-w-[150px] ${solicitadoPorDestajo === worker.name ? 'bg-blue-600 border-blue-600 text-white shadow-sm' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'}`}
-            >
-              {worker.name}
-            </button>
-          ))
-        )}
-      </div>
-    </div>
-  </div>
-)}
-
-        {/* FOOTER - RESUMEN DE SALIDA */}
-        <div className="bg-slate-900 text-white rounded-xl p-4 mt-4 shrink-0">
-          <div className="flex justify-between items-center">
-            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Importe Total Calculado:</span>
-            <span className="text-xl font-black text-emerald-400">
-              {montoGasto ? formatCurrency(parseFloat(montoGasto)) : '$0.00'}
-            </span>
+            </form>
           </div>
         </div>
+      )}
 
-        <div className="pt-4 flex justify-end gap-3 border-t border-slate-100 mt-6 shrink-0">
-          <button type="button" onClick={() => setIsExpenseModalOpen(false)} className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 rounded-xl">Cancelar</button>
-          <button type="submit" disabled={loadingExpenseForm || !montoGasto} className="bg-blue-600 text-white text-sm font-bold px-6 py-2 rounded-xl disabled:opacity-50 shadow-sm transition-all hover:bg-blue-700">
-            {loadingExpenseForm ? 'Guardando en Obra...' : 'Confirmar e Insertar'}
-          </button>
-        </div>
-      </form>
-    </div>
-  </div>
-)}
-
-      {/* 👷‍♂️ MODAL DE ALTA DE TRABAJADOR */}
       {isWorkerModalOpen && userRole === 'admin' && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
             <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
               <h3 className="text-lg font-bold text-slate-900">Dar de Alta Trabajador</h3>
-              <button onClick={() => setIsWorkerModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
+              <button onClick={() => setIsWorkerModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
             </div>
-            
             <form onSubmit={handleCreateWorker} className="p-6 space-y-4">
               {workerFormError && <div className="p-3 bg-red-50 text-red-600 text-xs rounded-xl">{workerFormError}</div>}
-              <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">Nombre Completo</label>
-                <input type="text" required placeholder="Ej. Juan Pérez López" value={newWorkerName} onChange={(e) => setNewWorkerName(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-900 text-sm font-medium focus:outline-none focus:border-blue-500" />
-              </div>
+              <div><label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">Nombre Completo</label><input type="text" required placeholder="Ej. Juan Pérez..." value={newWorkerName} onChange={(e) => setNewWorkerName(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-900 text-sm focus:border-blue-500 font-medium focus:outline-none" /></div>
               <div>
                 <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">Categoría / Puesto</label>
-                <select value={newWorkerRole} onChange={(e) => setNewWorkerRole(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-900 text-sm font-medium bg-white focus:outline-none focus:border-blue-500">
-                  <option value="Peón">Peón</option>
-                  <option value="Albañil">Albañil</option>
-                  <option value="Cabo de Oficios">Cabo de Oficios</option>
-                  <option value="Fierrero">Fierrero</option>
-                  <option value="Carpintero">Fierrero/Carpintero</option>
-                  <option value="Maestro de Obra">Maestro de Obra</option>
+                <select value={newWorkerRole} onChange={(e) => setNewWorkerRole(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-900 text-sm focus:outline-none bg-white font-medium">
+                  <option value="Peón">Peón</option><option value="Albañil">Albañil</option><option value="Cabo de Oficios">Cabo de Oficios</option><option value="Fierrero">Fierrero</option>
                 </select>
               </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">Teléfono de Contacto</label>
-                <input type="tel" maxLength={10} placeholder="Ej. 2221234567" value={newWorkerPhone} onChange={(e) => setNewWorkerPhone(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-900 text-sm font-medium focus:outline-none focus:border-blue-500" />
-              </div>
+              <div><label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">Teléfono de Contacto</label><input type="tel" maxLength={10} placeholder="Ej. 222..." value={newWorkerPhone} onChange={(e) => setNewWorkerPhone(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-900 text-sm focus:border-blue-500 font-medium focus:outline-none" /></div>
               <div className="pt-4 flex justify-end gap-3 border-t border-slate-100 mt-6">
                 <button type="button" onClick={() => setIsWorkerModalOpen(false)} className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 rounded-xl">Cancelar</button>
-                <button type="submit" disabled={loadingWorkerForm} className="bg-blue-600 text-white text-sm font-bold px-5 py-2 rounded-xl shadow-sm hover:bg-blue-700 disabled:opacity-50">{loadingWorkerForm ? 'Guardando...' : 'Contratar Personal'}</button>
+                <button type="submit" disabled={loadingWorkerForm} className="bg-blue-600 text-white text-sm font-bold px-5 py-2 rounded-xl shadow-sm hover:bg-blue-700">Contratar Personal</button>
               </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* 📐 MODAL DE SUBIR PLANO */}
       {isPlanosModalOpen && userRole === 'admin' && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-              <h3 className="text-lg font-bold text-slate-900">Subir Plano / Archivo</h3>
-              <button onClick={() => setIsPlanosModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
-            </div>
-            
+            <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50"><h3 className="text-lg font-bold text-slate-900">Subir Plano / Archivo</h3><button onClick={() => setIsPlanosModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button></div>
             <form onSubmit={handleUploadPlano} className="p-6 space-y-4">
               {planoError && <div className="p-3 bg-red-50 text-red-600 text-xs rounded-xl">{planoError}</div>}
-              
-              <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">Nombre del Plano</label>
-                <input type="text" required placeholder="Ej. Arquitectónico Planta Baja" value={planoName} onChange={(e) => setPlanoName(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-900 text-sm font-medium focus:outline-none focus:border-blue-500" />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">Versión</label>
-                <input type="text" required placeholder="Ej. v1.2" value={planoVersion} onChange={(e) => setPlanoVersion(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-900 text-sm font-medium focus:outline-none focus:border-blue-500" />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">Archivo (PDF, JPG, PNG)</label>
-                <input type="file" required accept=".pdf,image/*" onChange={(e) => setPlanoFile(e.target.files ? e.target.files[0] : null)} className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-bold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" />
-              </div>
-
-              <div className="pt-4 flex justify-end gap-3 border-t border-slate-100 mt-6">
-                <button type="button" onClick={() => setIsPlanosModalOpen(false)} className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 rounded-xl">Cancelar</button>
-                <button type="submit" disabled={loadingPlano || !planoFile} className="bg-blue-600 text-white text-sm font-bold px-5 py-2 rounded-xl shadow-sm hover:bg-blue-700 disabled:opacity-50">{loadingPlano ? 'Subiendo...' : 'Subir Archivo'}</button>
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">Categoría</label>
-                <select value={planoCategory} onChange={(e) => setPlanoCategory(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-900 text-sm font-medium focus:outline-none focus:border-blue-500 bg-white">
-                  <option value="Planos">Planos Arquitectónicos / Ingeniería</option>
-                  <option value="Permisos">Permisos y Licencias</option>
-                  <option value="Contratos">Contratos y Presupuestos</option>
-                  <option value="Otros">Otros Documentos</option>
-                </select>
-              </div>
+              <div><label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">Nombre del Plano</label><input type="text" required placeholder="Nombre..." value={planoName} onChange={(e) => setPlanoName(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-900 text-sm" /></div>
+              <div><label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">Versión</label><input type="text" required placeholder="Ej. v1.0" value={planoVersion} onChange={(e) => setPlanoVersion(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-900 text-sm" /></div>
+              <div><label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">Archivo</label><input type="file" required accept=".pdf,image/*" onChange={(e) => setPlanoFile(e.target.files ? e.target.files[0] : null)} className="w-full text-sm text-slate-500" /></div>
+              <div className="pt-4 flex justify-end gap-3 border-t border-slate-100 mt-6"><button type="button" onClick={() => setIsPlanosModalOpen(false)} className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 rounded-xl">Cancelar</button><button type="submit" disabled={loadingPlano || !planoFile} className="bg-blue-600 text-white text-sm font-bold px-5 py-2 rounded-xl shadow-sm">Subir Archivo</button></div>
             </form>
           </div>
         </div>
       )}
 
-      {/* MODAL DE NUEVA OBRA */}
       {isProjectModalOpen && userRole === 'admin' && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
           <div className="bg-white rounded-2xl shadow-xl border border-slate-100 w-full max-w-lg overflow-hidden transform transition-all">
-            <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-              <h3 className="text-lg font-bold text-slate-900">Alta de Nueva Obra</h3>
-              <button onClick={() => setIsProjectModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-200 transition-colors"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
-            </div>
+            <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50"><h3 className="text-lg font-bold text-slate-900">Alta de Nueva Obra</h3><button onClick={() => setIsProjectModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button></div>
             <form onSubmit={handleCreateProject} className="p-6 space-y-4">
-              {projectFormError && <div className="p-3 bg-red-50 text-red-600 text-xs rounded-xl border border-red-100">{projectFormError}</div>}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div><label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">Nombre de la Obra</label><input type="text" required placeholder="Ej. Torre Alpha, Bodega Norte" value={newProjectName} onChange={(e) => setNewProjectName(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-900 text-sm focus:outline-none focus:border-blue-500 font-medium" /></div>
-                {/* 🟢 CORRECCIÓN INPUT DE CREACIÓN */}
-                <div><label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">Nombre del Cliente</label><input type="text" required placeholder="Ej. Constructora Rocal S.A." value={newProjectCliente} onChange={(e) => setNewProjectCliente(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-900 text-sm focus:outline-none focus:border-blue-500 font-medium" /></div>
+                <div><label className="block text-xs font-bold text-slate-600 uppercase mb-1">Nombre de la Obra</label><input type="text" required placeholder="Nombre..." value={newProjectName} onChange={(e) => setNewProjectName(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-900 text-sm" /></div>
+                <div><label className="block text-xs font-bold text-slate-600 uppercase mb-1">Nombre del Cliente</label><input type="text" required placeholder="Cliente..." value={newProjectCliente} onChange={(e) => setNewProjectCliente(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-900 text-sm" /></div>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div><label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">No. de Contrato</label><input type="text" required placeholder="Ej. CTR-2026-009" value={newProjectNumContrato} onChange={(e) => setNewProjectNumContrato(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-900 text-sm focus:outline-none focus:border-blue-500 font-medium" /></div>
-                <div><label className="block text-xs font-bold text-slate-600 tracking-wider mb-1 uppercase text-slate-600">Asignar Residente</label><select value={selectedResidentId} onChange={(e) => setSelectedResidentId(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-900 text-sm focus:outline-none focus:border-blue-500 bg-white font-medium"><option value="">-- Seleccionar Residente --</option>{residents.map((res) => (<option key={res.id} value={res.id}>{res.full_name}</option>))}</select></div>
+                <div><label className="block text-xs font-bold text-slate-600 uppercase mb-1">No. de Contrato</label><input type="text" required placeholder="Contrato..." value={newProjectNumContrato} onChange={(e) => setNewProjectNumContrato(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-900 text-sm" /></div>
+                <div><label className="block text-xs font-bold text-slate-600 uppercase mb-1">Asignar Residente</label><select value={selectedResidentId} onChange={(e) => setSelectedResidentId(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-900 text-sm bg-white"><option value="">-- Seleccionar --</option>{residents.map((res) => (<option key={res.id} value={res.id}>{res.full_name}</option>))}</select></div>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div><label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">Fecha de Inicio</label><input type="date" value={newProjectFechaInicio} onChange={(e) => setNewProjectFechaInicio(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-900 text-sm focus:outline-none focus:border-blue-500 font-medium" /></div>
-                <div><label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">Fecha de Término</label><input type="date" value={newProjectFechaFin} onChange={(e) => setNewProjectFechaFin(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-900 text-sm focus:outline-none focus:border-blue-500 font-medium" /></div>
-              </div>
-              <div className="pt-4 flex justify-end gap-3 border-t border-slate-100 mt-6"><button type="button" onClick={() => setIsProjectModalOpen(false)} className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 rounded-xl">Cancelar</button><button type="submit" disabled={loadingProjectForm} className="bg-slate-900 text-white text-sm font-bold px-5 py-2 rounded-xl hover:bg-slate-800 shadow-sm disabled:opacity-50">{loadingProjectForm ? 'Creando...' : 'Confirmar e Instalar Obra'}</button></div>
+              <div className="pt-4 flex justify-end gap-3 border-t border-slate-100 mt-6"><button type="button" onClick={() => setIsProjectModalOpen(false)} className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 rounded-xl">Cancelar</button><button type="submit" disabled={loadingProjectForm} className="bg-slate-900 text-white text-sm font-bold px-5 py-2 rounded-xl shadow-sm">Confirmar Obra</button></div>
             </form>
           </div>
         </div>
       )}
-      {/* 🏁 MODAL DE CONFIRMACIÓN DE CIERRE DE OBRA */}
+
       {isFinishModalOpen && userRole === 'admin' && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden transform transition-all">
-            <div className="bg-red-50 p-6 flex flex-col items-center border-b border-red-100">
-              <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mb-4">
-                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
-              </div>
-              <h3 className="text-xl font-bold text-red-700 text-center">¿Finalizar esta Obra?</h3>
-            </div>
-            
-            <div className="p-6 text-center text-slate-600 text-sm">
-              <p className="mb-4">
-                Estás a punto de dar por concluido el proyecto <strong>"{selectedProject?.name}"</strong>.
-              </p>
-              <ul className="text-left bg-slate-50 p-4 rounded-lg space-y-2 text-xs mb-4 border border-slate-100">
-                <li className="flex items-center gap-2"><svg className="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg> Se generará un Acta de Cierre en PDF.</li>
-                <li className="flex items-center gap-2"><svg className="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" /></svg> Desaparecerá del panel de Obras Activas.</li>
-                <li className="flex items-center gap-2"><svg className="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" /></svg> Su información se respaldará en el "Historial".</li>
-              </ul>
-            </div>
-            
-            <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-end gap-3">
-              <button 
-                type="button"
-                onClick={(e) => { e.preventDefault(); setIsFinishModalOpen(false); }} 
-                className="px-5 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
-                disabled={finishingProject}
-              >
-                Cancelar
-              </button>
-              <button 
-                type="button"
-                onClick={(e) => { 
-                  e.preventDefault(); 
-                  handleFinalizarObra(); 
-                }} 
-                disabled={finishingProject} 
-                className="bg-red-600 text-white text-sm font-bold px-6 py-2.5 rounded-xl shadow-md hover:bg-red-700 disabled:opacity-50 transition-colors flex items-center gap-2 cursor-pointer"
-              >
-                {finishingProject ? 'Procesando...' : 'Sí, Finalizar Obra'}
-              </button>
-            </div>
+            <div className="bg-red-50 p-6 flex flex-col items-center border-b border-red-100"><div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mb-4"><svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg></div><h3 className="text-xl font-bold text-red-700 text-center">¿Finalizar esta Obra?</h3></div>
+            <div className="p-6 text-center text-slate-600 text-sm"><p>Estás a punto de archivar el proyecto <strong>"{selectedProject?.name}"</strong>.</p></div>
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-end gap-3"><button type="button" onClick={() => setIsFinishModalOpen(false)} className="px-5 py-2.5 text-sm font-bold text-slate-600 rounded-xl">Cancelar</button><button type="button" onClick={handleFinalizarObra} disabled={finishingProject} className="bg-red-600 text-white text-sm font-bold px-6 py-2.5 rounded-xl shadow-md">{finishingProject ? 'Procesando...' : 'Sí, Finalizar Obra'}</button></div>
           </div>
         </div>
       )}
+
     </div>
   );
 }
