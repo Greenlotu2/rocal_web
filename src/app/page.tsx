@@ -9,8 +9,36 @@ import jsPDF from 'jspdf';
 export const dynamic = 'force-dynamic';
 import autoTable from 'jspdf-autotable';
 
+// Icono Feather simplificado para no meter dependencias extras en Next.js
+const SearchIcon = () => (
+  <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+);
+
+interface HerramientaAlmacen {
+  id: string;
+  codigo: string;
+  nombre: string;
+  marca_modelo: string;
+  ubicacion: 'bodega' | 'obra';
+  asignado_a?: string | null;
+  notas?: string | null;
+  token_firma?: string | null;
+  fecha_firma?: string | null;
+  ine_url?: string | null;
+  firma_entrega_url?: string | null;
+  firma_recibe_url?: string | null;
+  fecha_entrega?: string | null;
+  fecha_devolucion?: string | null;
+}
+
+interface ItemAdicional {
+  id: string;
+  nombre: string;
+  marca: string;
+}
+
 export default function DashboardPage() {
-  // --- ESTADOS ADICIONALES PARA FORMULARIOS MÓVILES HOMOLOGADOS ---
+  // --- ESTADOS DE CONTROL Y REGISTROS ---
   const [numNota, setNumNota] = useState('');
   const [responsableGasto, setResponsableGasto] = useState('');
   const [justificacionCaja, setJustificacionCaja] = useState('');
@@ -31,7 +59,7 @@ export default function DashboardPage() {
   const [selectedProject, setSelectedProject] = useState<any | null>(null);
   const [residents, setResidents] = useState<any[]>([]);
   
-  const [metrics, setMetrics] = useState({ gastoDirecto: 0, cajaChica: 0, personalActivo: 0 });
+  const [metrics, setMetrics] = useState({ gactuar: 0, gastoDirecto: 0, cajaChica: 0, personalActivo: 0 });
   const [loadingMetrics, setLoadingMetrics] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null); 
 
@@ -44,11 +72,10 @@ export default function DashboardPage() {
   const [inventoryRecords, setInventoryRecords] = useState<any[]>([]);
   const [maquinariaRecords, setMaquinariaRecords] = useState<any[]>([]); 
 
-  const [activeTab, setActiveTab] = useState<'analisis' | 'caja' | 'personal' | 'bitacora' | 'planos'>('analisis');
+  const [activeTab, setActiveTab] = useState<'analisis' | 'caja' | 'personal' | 'bitacora' | 'planos' | 'resguardos'>('analisis');
   const [expenseSubTab, setExpenseSubTab] = useState<'generales' | 'caja_chica' | 'maquinaria' | 'destajos'>('generales'); 
 
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
-  
   const [isWorkerModalOpen, setIsWorkerModalOpen] = useState(false);
   const [newWorkerName, setNewWorkerName] = useState('');
   const [newWorkerRole, setNewWorkerRole] = useState('Peón');
@@ -87,23 +114,21 @@ export default function DashboardPage() {
   const [loadingProjectForm, setLoadingProjectForm] = useState(false);
   const [projectFormError, setProjectFormError] = useState<string | null>(null);
 
-  // 🏁 ESTADOS PARA FINALIZAR OBRA
   const [isFinishModalOpen, setIsFinishModalOpen] = useState(false);
   const [finishingProject, setFinishingProject] = useState(false);
 
-  // ✏️ ESTADOS PARA EDITAR EL PROYECTO
   const [isEditingProject, setIsEditingProject] = useState(false);
   const [updatingProject, setUpdatingProject] = useState(false);
   const [editProjectForm, setEditProjectForm] = useState({
-    name: '',
-    client_name: '', 
-    contract_number: '',
-    start_date: '',
-    end_date: ''
+    name: '', client_name: '', contract_number: '', start_date: '', end_date: ''
   });
 
+  // --- ESTADOS DE CONTROL DE ALMACÉN ---
+  const [herramientas, setHerramientas] = useState<HerramientaAlmacen[]>([]);
+  const [searchResguardo, setSearchResguardo] = useState('');
+  const [filtroUbicacionResguardo, setFiltroUbicacionResguardo] = useState<'todos' | 'bodega' | 'obra'>('todos');
+
   const COLORS = useMemo(() => ['#F59E0B', '#3B82F6', '#10B981', '#8B5CF6'], []);
-  
   
   const formatCurrency = (amount: number) => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(amount);
   const formatDate = (dateString: string) => {
@@ -135,7 +160,7 @@ export default function DashboardPage() {
     return (
       <div className="flex gap-1 mt-1">
         {attArray.slice(0, 6).map((isPresent, i) => (
-          <div key={i} title={isPresent ? 'Asistió' : 'Faltó'} className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold shadow-sm ${isPresent ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700 border border-red-200'}`}>
+          <div key={i} className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold ${isPresent ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700 border border-red-200'}`}>
             {days[i]}
           </div>
         ))}
@@ -159,7 +184,6 @@ export default function DashboardPage() {
       const { data: gastos } = await supabase.from('gastos_generales').select('*').eq('project_id', projectId).eq('is_active', true).order('fecha', { ascending: false });
       setGastosGeneralesRecords(gastos || []);
 
-      // 🟢 FILTRO DE ACTIVOS: is_active
       const { data: workers } = await supabase.from('workers').select('*').eq('project_id', projectId).eq('is_active', true);
       setWorkersRecords(workers || []);
 
@@ -181,7 +205,11 @@ export default function DashboardPage() {
       const { data: maquinaria } = await supabase.from('gastos_maquinaria').select('*').eq('project_id', projectId).order('fecha', { ascending: false });
       setMaquinariaRecords(maquinaria || []);
 
+      const { data: herramientasData } = await supabase.from('almacen_herramientas').select('*').eq('project_id', projectId).eq('is_active', true).order('created_at', { ascending: false });
+      setHerramientas(herramientasData || []);
+
       setMetrics({
+        gactuar: 0,
         gastoDirecto: gastos?.reduce((sum, item) => sum + (Number(item.monto) || 0), 0) || 0,
         personalActivo: workers?.length || 0,
         cajaChica: caja?.reduce((sum, item) => sum + (Number(item.monto) || 0), 0) || 0
@@ -249,7 +277,7 @@ export default function DashboardPage() {
     return chartData.reduce((sum, item) => sum + item.value, 0);
   }, [chartData]);
 
-const weeklySummaryData = useMemo(() => {
+  const weeklySummaryData = useMemo(() => {
     const weeks: Record<string, { startString: string, gastos: number, caja: number, nomina: number, destajos: number, total: number }> = {};
 
     const getMondayObj = (dString: string) => {
@@ -288,7 +316,6 @@ const weeklySummaryData = useMemo(() => {
       .map(([_, data]) => data);
   }, [gastosGeneralesRecords, cajaChicaRecords, payrollRecords, inventoryRecords]);
 
-  // 🧮 AGREGACIÓN DINÁMICA POR SEMANAS (Basado en week_start de payroll_records)
   const registrosAgrupadosPorSemana = useMemo(() => {
     const semanas: Record<string, { numeroSemana: string; fechaRepresentativa: Date; registros: any[]; subtotalSemana: number }> = {};
 
@@ -313,7 +340,16 @@ const weeklySummaryData = useMemo(() => {
     return Object.values(semanas).sort((a, b) => b.fechaRepresentativa.getTime() - a.fechaRepresentativa.getTime());
   }, [payrollRecords]);
 
-  // 💰 COSTO TOTAL ACUMULADO
+  const filteredHerramientasWeb = useMemo(() => {
+    return herramientas.filter((h) => {
+      const cumpleBusqueda = h.nombre?.toLowerCase().includes(searchResguardo.toLowerCase()) ||
+                            h.codigo?.toLowerCase().includes(searchResguardo.toLowerCase()) ||
+                            h.marca_modelo?.toLowerCase().includes(searchResguardo.toLowerCase()) ||
+                            (h.asignado_a && h.asignado_a.toLowerCase().includes(searchResguardo.toLowerCase()));
+      return cumpleBusqueda && (filtroUbicacionResguardo === 'todos' ? true : h.ubicacion === filtroUbicacionResguardo);
+    });
+  }, [herramientas, searchResguardo, filtroUbicacionResguardo]);
+
   const totalHistoricoRaya = useMemo(() => {
     return payrollRecords.reduce((sum, p) => sum + Number(p.final_salary || 0), 0);
   }, [payrollRecords]);
@@ -386,7 +422,7 @@ const weeklySummaryData = useMemo(() => {
             cantidad: cantidadGasto ? parseFloat(cantidadGasto) : 1,
             unit_price: precioUnitarioGasto ? parseFloat(precioUnitarioGasto) : 0,
             encargado_recibe: encargadoRecibeDestajo || null, 
-            solicitado_por: solicitadoPorDestajo || null,     
+            solicitado_por: solicitadoPorDestajo || null,      
             created_at: new Date().toISOString()
           }]);
           error = resInv.error;
@@ -457,7 +493,6 @@ const weeklySummaryData = useMemo(() => {
       }]);
       
       if (dbError) throw dbError;
-      
       setPlanoName(''); setPlanoVersion('v1.0'); setPlanoCategory('Planos'); setPlanoFile(null); setIsPlanosModalOpen(false);
       await fetchMetricsAndRecords(selectedProject.id);
     } catch (error: any) { setPlanoError("Error al subir plano: " + error.message); } finally { setLoadingPlano(false); }
@@ -562,7 +597,7 @@ const weeklySummaryData = useMemo(() => {
       return `<tr class="${index % 2 === 0 ? 'bg-gray' : ''}"><td><strong>${worker.name_worker || worker.name}</strong><br><span style="font-size:10px;color:#666;">${worker.role}</span></td><td style="text-align:center;">$${(Number(worker.weekly_salary) || 0).toFixed(2)}</td><td style="text-align:center;color:#DC2626;">${daysAbsent > 0 ? daysAbsent : '-'}</td><td style="text-align:center;color:#DC2626;">${totalDeductions > 0 ? '-$' + totalDeductions.toFixed(2) : '-'}${reasonText}</td><td style="text-align:right;font-weight:bold;color:#059669;">$${finalSalary.toFixed(2)}</td><td style="text-align:center;"><div style="border-bottom:1px solid #999;width:80px;margin:auto;"></div></td></tr>`;
     }).join('');
 
-    const htmlContent = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{font-family:sans-serif;padding:40px;}table{width:100%;border-collapse:collapse;font-size:12px;margin-top:20px;}th{background:#1E293B;color:#fff;padding:8px;text-align:left;}td{padding:8px;border-bottom:1px solid #eee;}.bg-gray{background:#F8FAFC;}</style></head><body><h2>Constructora Rocal S.A.</h2><h3>Reporte de Raya: ${projectName}</h3><table><thead><tr><th>Trabajador</th><th style="text-align:center;">Sueldo Base</th><th style="text-align:center;">Faltas</th><th style="text-align:center;">Descuentos</th><th style="text-align:right;">Pagar</th><th style="text-align:center;">Firma</th></tr></thead><tbody>${rowsHtml}</tbody></table><div style="float:right;margin-top:20px;border:1px solid #ccc;padding:15px;"><strong>Total a Pagar: $${totalFinal.toFixed(2)}</strong></div><script>setTimeout(()=>{window.print();},500);</script></body></html>`;
+    const htmlContent = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Reporte de Raya</title><style>body{font-family:sans-serif;padding:40px;}table{width:100%;border-collapse:collapse;font-size:12px;margin-top:20px;}th{background:#1E293B;color:#fff;padding:8px;text-align:left;}td{padding:8px;border-bottom:1px solid #eee;}.bg-gray{background:#F8FAFC;}</style></head><body><h2>Constructora Rocal S.A.</h2><h3>Reporte de Raya: ${projectName}</h3><table><thead><tr><th>Trabajador</th><th style="text-align:center;">Sueldo Base</th><th style="text-align:center;">Faltas</th><th style="text-align:center;">Descuentos</th><th style="text-align:right;">Pagar</th><th style="text-align:center;">Firma</th></tr></thead><tbody>${rowsHtml}</tbody></table><div style="float:right;margin-top:20px;border:1px solid #ccc;padding:15px;"><strong>Total a Pagar: $${totalFinal.toFixed(2)}</strong></div><script>setTimeout(()=>{window.print();},500);</script></body></html>`;
     const iframe = document.createElement('iframe'); iframe.style.position = 'absolute'; iframe.style.width = '0px'; iframe.style.height = '0px'; iframe.style.border = 'none';
     document.body.appendChild(iframe); const iframeDoc = iframe.contentWindow?.document;
     if (iframeDoc) { iframeDoc.open(); iframeDoc.write(htmlContent); iframeDoc.close(); }
@@ -614,36 +649,21 @@ const weeklySummaryData = useMemo(() => {
     try {
       const projectName = selectedProject?.name || 'Obra sin nombre';
       const fechaCierre = new Date().toLocaleDateString('es-MX', { year: 'numeric', month: 'long', day: 'numeric' });
-
       const doc = new jsPDF();
 
-      doc.setFontSize(20);
-      doc.setTextColor(15, 23, 42);
-      doc.text('ACTA DE CIERRE DE OBRA', 14, 20);
+      doc.setFontSize(20); doc.setTextColor(15, 23, 42); doc.text('ACTA DE CIERRE DE OBRA', 14, 20);
+      doc.setDrawColor(37, 99, 235); doc.setLineWidth(0.8); doc.line(14, 24, 196, 24);
 
-      doc.setDrawColor(37, 99, 235);
-      doc.setLineWidth(0.8);
-      doc.line(14, 24, 196, 24);
-
-      doc.setFontSize(10);
-      doc.setTextColor(100, 116, 139);
+      doc.setFontSize(10); doc.setTextColor(100, 116, 139);
       doc.text(`Proyecto: ${projectName}  |  Cliente: ${selectedProject?.client_name || 'N/A'}`, 14, 32);
       doc.text(`Contrato: ${selectedProject?.contract_number || 'N/A'}  |  Fecha de Cierre: ${fechaCierre}`, 14, 38);
 
       let y = 50;
-      doc.setFontSize(9);
-      doc.setTextColor(100, 116, 139);
-      doc.text('COSTO DIRECTO TOTAL', 14, y);
-      doc.text('PERSONAL CONTRATADO', 84, y);
-      doc.text('REPORTES EN BITÁCORA', 154, y);
+      doc.setFontSize(9); doc.text('COSTO DIRECTO TOTAL', 14, y); doc.text('PERSONAL CONTRATADO', 84, y); doc.text('REPORTES EN BITÁCORA', 154, y);
 
       y += 7;
-      doc.setFontSize(14);
-      doc.setTextColor(239, 68, 68);
-      doc.text(formatCurrency(montoTotal), 14, y); 
-      doc.setTextColor(15, 23, 42);
-      doc.text(String(metrics.personalActivo), 84, y);
-      doc.text(String(bitacoraRecords.length), 154, y);
+      doc.setFontSize(14); doc.setTextColor(239, 68, 68); doc.text(formatCurrency(montoTotal), 14, y); 
+      doc.setTextColor(15, 23, 42); doc.text(String(metrics.personalActivo), 84, y); doc.text(String(bitacoraRecords.length), 154, y);
 
       y += 12;
       autoTable(doc, {
@@ -656,40 +676,24 @@ const weeklySummaryData = useMemo(() => {
         theme: 'grid',
         headStyles: { fillColor: [241, 245, 249], textColor: [30, 41, 59], fontStyle: 'bold' },
         styles: { fontSize: 9 },
-        columnStyles: {
-          1: { halign: 'right' },
-          2: { halign: 'right' }
-        }
+        columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' } }
       });
 
       const finalY = (doc as any).lastAutoTable.finalY || y + 40;
-      doc.setFontSize(8);
-      doc.setTextColor(148, 163, 184);
+      doc.setFontSize(8); doc.setTextColor(148, 163, 184);
       doc.text('Documento generado automáticamente por el sistema de control de obra.', 105, finalY + 20, { align: 'center' });
-      doc.text('Firmas de conformidad requeridas en anexo físico.', 105, finalY + 25, { align: 'center' });
 
       const pdfArrayBuffer = doc.output('arraybuffer');
       const pdfBlob = new Blob([pdfArrayBuffer], { type: 'application/pdf' });
-      
       const fileName = `${selectedProject?.id}_${Date.now()}.pdf`;
       const filePath = `actas_cierre/${fileName}`;
 
-      const { error: uploadError } = await supabase.storage
-        .from('reportes_cierre')
-        .upload(filePath, pdfBlob, { 
-          cacheControl: '3600',
-          upsert: true 
-        });
-
-      if (uploadError) {
-        throw new Error(`Error en Storage: ${uploadError.message}`);
-      }
+      const { error: uploadError } = await supabase.storage.from('reportes_cierre').upload(filePath, pdfBlob, { cacheControl: '3600', upsert: true });
+      if (uploadError) throw uploadError;
 
       const { data: publicUrlData } = supabase.storage.from('reportes_cierre').getPublicUrl(filePath);
       return publicUrlData.publicUrl;
-
     } catch (err: any) {
-      console.error('Error dentro de generarReporteMaestroPDF:', err);
       alert('Falló la creación del PDF: ' + err.message);
       return null;
     }
@@ -698,52 +702,130 @@ const weeklySummaryData = useMemo(() => {
   const handleFinalizarObra = async () => {
     if (!selectedProject) return;
     setFinishingProject(true);
-
     try {
       const pdfUrl = await generarReporteMaestroPDF(totalConsolidated);
-      
-      if (!pdfUrl) {
-        throw new Error('El Storage de Supabase no devolvió una URL válida.');
-      }
+      if (!pdfUrl) throw new Error('El Storage de Supabase no devolvió una URL válida.');
 
-      const { error } = await supabase
-        .from('projects')
-        .update({
-          status: 'finalizada',
-          end_date: new Date().toISOString().split('T')[0],
-          reporte_cierre_url: pdfUrl
-        })
-        .eq('id', selectedProject.id);
-
-      if (error) throw new Error(`Error actualizando tabla: ${error.message}`);
+      const { error } = await supabase.from('projects').update({ status: 'finalizada', end_date: new Date().toISOString().split('T')[0], reporte_cierre_url: pdfUrl }).eq('id', selectedProject.id);
+      if (error) throw error;
 
       const obrasRestantes = projects.filter(p => p.id !== selectedProject.id);
       setProjects(obrasRestantes);
       setSelectedProject(obrasRestantes.length > 0 ? obrasRestantes[0] : null);
       setIsFinishModalOpen(false);
-
-      alert('¡Obra finalizada exitosamente! El archivo se cargó en el Storage y la tabla se actualizó.');
-
+      alert('¡Obra finalizada exitosamente!');
     } catch (error: any) {
-      console.error('Error en handleFinalizarObra:', error);
       alert('Error crítico al finalizar la obra: ' + error.message);
     } finally {
       setFinishingProject(false);
     }
   };
 
+  // 🟢 FUNCIÓN EXCLUSIVA PARA GENERAR E IMPRIMIR LA RESPONSIVA LEGAL DESDE LA PLATAFORMA WEB
+  const ejecutarExportacionPDFWeb = (tool: HerramientaAlmacen) => {
+    const fechaPrestamo = new Date(tool.fecha_entrega || new Date()).toLocaleDateString('es-MX', { 
+      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' 
+    }).toUpperCase();
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html lang="es">
+      <head>
+        <meta charset="UTF-8">
+        <title>Responsiva_${tool.codigo}</title>
+        <style>
+          body { font-family: 'Helvetica', 'Arial', sans-serif; color: #1e293b; padding: 40px; line-height: 1.6; max-width: 800px; margin: auto; }
+          .header { text-align: right; font-size: 12px; margin-bottom: 40px; font-weight: bold; }
+          .present { font-size: 14px; font-weight: bold; margin-top: 20px; margin-bottom: 20px; }
+          .content { text-align: justify; font-size: 13px; margin-bottom: 20px; }
+          .equipos-box { background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 15px; border-radius: 8px; margin: 20px 0; font-family: monospace; white-space: pre-wrap; font-size: 13px; }
+          .footer-signatures { margin-top: 60px; display: flex; justify-content: space-between; page-break-inside: avoid; }
+          .signature-col { width: 45%; text-align: center; font-size: 12px; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; }
+          .img-firma { height: 65px; max-width: 180px; object-fit: contain; margin-bottom: 4px; }
+          .signature-placeholder { height: 65px; border-bottom: 1px solid #475569; width: 100%; margin-bottom: 8px; } 
+          .digital-seal { margin-top: 40px; padding: 10px; border: 1px dashed #cbd5e1; background-color: #f1f5f9; border-radius: 6px; font-size: 10px; color: #64748B; font-family: monospace; text-align: left; }
+          .verse { text-align: center; margin-top: 50px; font-size: 11px; font-style: italic; color: #64748b; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          ${fechaPrestamo}<br>
+          San Pablo del Monte, Tlaxcala<br>
+          ASUNTO: RESPONSIVA DE EQUIPAMIENTO INDIVIDUAL<br>
+          N. DE RESPONSIVA: ${tool.codigo}
+        </div>
+
+        <div class="present">
+          A QUIEN CORRESPONDA<br>
+          PARA FINES ADMINISTRATIVOS Y LEGALES<br>
+          PRESENTE:
+        </div>
+
+        <div class="content">
+          En referencia al proyecto <strong>"${selectedProject?.name || 'PROYECTO DE CONSTRUCCIÓN'}"</strong>, se establece que el responsable de la custodia y ejecución de los trabajos será el <strong>${tool.asignado_a || 'RESPONSABLE NO ASIGNADO'}</strong>, el cual en mutuo acuerdo con el representante de la empresa acuerda recibir en <strong>DEBIDAS Y ÓPTIMAS CONDICIONES EL SIGUIENTE EQUIPO</strong> para la realización de sus labores:
+        </div>
+
+        <div class="equipos-box">- 1 Unidad de ${tool.nombre}\n- Marca/Modelo: ${tool.marca_modelo}\n- Notas: ${tool.notas || 'ÓPTIMAS CONDICIONES DE OPERACIÓN'}</div>
+
+        <div class="content">
+          El receptor asume la <strong>RESPONSABILIDAD Y EL CUIDADO DE DICHO EQUIPO / HERRAMIENTA</strong> y se compromete a utilizarlo con un uso estrictamente laboral. Cualquier problema o fallo deberá ser informado de inmediato para su renovación o mantenimiento. En caso de que el equipo sea extraviado o dañado por mal uso, este tendrá que reponerse por el encargado, aceptando que se recibe listo para usarse.
+        </div>
+
+        <div class="footer-signatures">
+          <div class="signature-col">
+            ${tool.firma_entrega_url 
+              ? `<img src="${tool.firma_entrega_url}" class="img-firma" />` 
+              : `<div class="signature-placeholder"></div>`
+            }
+            <p style="font-size: 12px; font-weight: bold; margin: 0; border-top: 1px solid #475569; width: 100%; pt: 4px;">ENTREGA</p>
+            <p style="font-size: 8px; color: #64748B; font-family: monospace; margin-top: 4px; font-weight: bold;">🔒 EMISOR AUTORIZADO</p>
+          </div>
+
+          <div class="signature-col">
+            ${tool.firma_recibe_url 
+              ? `<img src="${tool.firma_recibe_url}" class="img-firma" />` 
+              : `<div class="signature-placeholder"></div>`
+            }
+            <p style="font-size: 12px; font-weight: bold; margin: 0; border-top: 1px solid #475569; width: 100%; pt: 4px;">RECIBE Y ACEPTA</p>
+            <p style="font-size: 11px; margin: 2px 0 0 0;">${tool.asignado_a}</p>
+            <p style="font-size: 8px; color: #16A34A; font-family: monospace; margin-top: 4px; font-weight: bold;">🔒 FIRMA AUTÓGRAFA DIGITAL</p>
+          </div>
+        </div>
+
+        <div class="digital-seal">
+          <strong>🔒 SELLO DE CERTIFICACIÓN DIGITAL CRIPTOGRÁFICA MUTUA</strong><br>
+          HASH DE AUDITORÍA: ${tool.token_firma || 'PENDIENTE'}<br>
+          UUID DEL REGISTRO: ${tool.id}<br>
+          Estado de Validación: CERTIFICADO - EXPEDIENTE CON INTERFAZ DE FIRMAS HISTÓRICAS PERMANENTES<br>
+          Timestamp de Sello: ${tool.fecha_firma || 'N/A'}
+        </div>
+
+        <div class="verse">
+          "Porque toda casa tiene su constructor, pero el constructor de todo es Dios." - Hebreos 3:4
+        </div>
+      </body>
+      </html>
+    `;
+
+    const ventanaImpresion = window.open('', '_blank');
+    if (ventanaImpresion) {
+      ventanaImpresion.document.open();
+      ventanaImpresion.document.write(htmlContent);
+      ventanaImpresion.document.close();
+      setTimeout(() => {
+        ventanaImpresion.print();
+      }, 500);
+    }
+  };
+
   return (
     <div className="flex min-h-screen bg-slate-50">
       
-      {/* 🌑 BARRA LATERAL ESTILIZADA */}
+      {/* 🌑 BARRA LATERAL */}
       <div className="w-64 bg-[#0F172A] text-white flex flex-col shrink-0 border-r border-slate-800 h-screen relative overflow-hidden">
         <div className="shrink-0">
           <div className="p-8 pb-4">
-            <img 
-              src="/logo-completo.png" 
-              alt="Logo Rocal" 
-              className="w-full h-auto mb-1 brightness-200" 
-            />
+            <img src="/logo-completo.png" alt="Logo Rocal" className="w-full h-auto mb-1 brightness-200" />
             <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">
               {userRole === 'admin' ? 'Panel de Administración' : 'Control de Oficina'}
             </p>
@@ -759,16 +841,9 @@ const weeklySummaryData = useMemo(() => {
           </div>
         </div>
 
-        <nav className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent p-3" style={{maxHeight: 'calc(100vh - 280px)'}}>
+        <nav className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 p-3" style={{maxHeight: 'calc(100vh - 280px)'}}>
           {projects.map(proj => (
-            <button 
-              key={proj.id} 
-              onClick={() => setSelectedProject(proj)} 
-              className={`w-full text-left px-4 py-3 rounded-xl transition-all duration-200 flex items-center gap-3 text-sm font-medium
-                ${selectedProject?.id === proj.id 
-                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20' 
-                  : 'text-slate-400 hover:bg-[#1E293B] hover:text-white'}`}
-            >
+            <button key={proj.id} onClick={() => setSelectedProject(proj)} className={`w-full text-left px-4 py-3 rounded-xl transition-all flex items-center gap-3 text-sm font-medium ${selectedProject?.id === proj.id ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:bg-[#1E293B] hover:text-white'}`}>
               <div className={`w-1.5 h-1.5 rounded-full ${selectedProject?.id === proj.id ? 'bg-white' : 'bg-slate-600'}`}></div>
               {proj.name}
             </button>
@@ -778,26 +853,22 @@ const weeklySummaryData = useMemo(() => {
         <div className="shrink-0 bg-[#0F172A]">
           <div className="pt-4 border-t border-slate-800 flex flex-col gap-2 px-5 mb-4 mt-2">
             <Link href="/perfil" className="flex items-center gap-3 py-2 text-slate-400 hover:text-white text-sm font-semibold transition-colors">
-              <div className="w-8 h-8 rounded-full bg-[#1E293B] flex items-center justify-center">👤</div>
-              Mi Perfil
+              <div className="w-8 h-8 rounded-full bg-[#1E293B] flex items-center justify-center">👤</div>Mi Perfil
             </Link>
 
             {userRole === 'admin' && (
               <Link href="/admin/usuarios" className="flex items-center gap-3 py-2 text-slate-400 hover:text-white text-sm font-semibold transition-colors">
-                <div className="w-8 h-8 rounded-full bg-[#1E293B] flex items-center justify-center">⚙️</div>
-                Control de Personal
+                <div className="w-8 h-8 rounded-full bg-[#1E293B] flex items-center justify-center">⚙️</div>Control de Personal
               </Link>
             )}
-             <Link href="/historial" className="flex items-center gap-3 py-2 text-slate-400 hover:text-white text-sm font-semibold transition-colors">
-                <div className="w-8 h-8 rounded-full bg-[#1E293B] flex items-center justify-center">📁</div>
-                Historial
-              </Link>
+            <Link href="/historial" className="flex items-center gap-3 py-2 text-slate-400 hover:text-white text-sm font-semibold transition-colors">
+              <div className="w-8 h-8 rounded-full bg-[#1E293B] flex items-center justify-center">📁</div>Historial
+            </Link>
           </div>
 
           <div className="p-6 pt-4 border-t border-slate-800">
             <button onClick={() => supabase.auth.signOut().then(() => router.push('/login'))} className="w-full flex items-center gap-3 text-red-400/80 hover:text-red-400 text-xs font-bold uppercase tracking-widest transition-colors">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
-              Cerrar Sesión
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>Cerrar Sesión
             </button>
           </div>
         </div>
@@ -844,7 +915,6 @@ const weeklySummaryData = useMemo(() => {
                       onClick={(e) => { e.preventDefault(); e.stopPropagation(); setIsFinishModalOpen(true); }} 
                       className="flex items-center gap-1.5 text-red-500 hover:text-white transition-colors bg-red-50 px-2 py-1.5 rounded-lg hover:bg-red-500 text-xs font-bold cursor-pointer"
                     >
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>
                       Cerrar Obra
                     </button>
                     <button 
@@ -852,33 +922,33 @@ const weeklySummaryData = useMemo(() => {
                       onClick={(e) => { e.preventDefault(); startEditingProject(); }} 
                       className="text-slate-400 hover:text-blue-600 transition-colors bg-slate-50 p-1.5 rounded-lg hover:bg-blue-50 cursor-pointer"
                     >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                      ✏️
                     </button>
                   </div>
                 )}
 
                 {isEditingProject ? (
-                  <div className="animate-fade-in">
+                  <div>
                     <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-sm mb-4">
-                      <div><label className="text-xs font-bold text-slate-400 block uppercase tracking-wider mb-1">Proyecto / Obra</label><input type="text" value={editProjectForm.name} onChange={(e) => setEditProjectForm({...editProjectForm, name: e.target.value})} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
-                      <div><label className="text-xs font-bold text-slate-400 block uppercase tracking-wider mb-1">Cliente de Obra</label><input type="text" value={editProjectForm.client_name} onChange={(e) => setEditProjectForm({...editProjectForm, client_name: e.target.value})} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
-                      <div><label className="text-xs font-bold text-slate-400 block uppercase tracking-wider mb-1">No. de Contrato</label><input type="text" value={editProjectForm.contract_number} onChange={(e) => setEditProjectForm({...editProjectForm, contract_number: e.target.value})} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
+                      <div><label className="text-xs font-bold text-slate-400 block uppercase mb-1">Proyecto / Obra</label><input type="text" value={editProjectForm.name} onChange={(e) => setEditProjectForm({...editProjectForm, name: e.target.value})} className="w-full rounded-lg border px-3 py-2 text-slate-900" /></div>
+                      <div><label className="text-xs font-bold text-slate-400 block uppercase mb-1">Cliente de Obra</label><input type="text" value={editProjectForm.client_name} onChange={(e) => setEditProjectForm({...editProjectForm, client_name: e.target.value})} className="w-full rounded-lg border px-3 py-2 text-slate-900" /></div>
+                      <div><label className="text-xs font-bold text-slate-400 block uppercase mb-1">No. de Contrato</label><input type="text" value={editProjectForm.contract_number} onChange={(e) => setEditProjectForm({...editProjectForm, contract_number: e.target.value})} className="w-full rounded-lg border px-3 py-2 text-slate-900" /></div>
                       <div className="grid grid-cols-2 gap-2">
-                        <div><label className="text-xs font-bold text-slate-400 block uppercase tracking-wider mb-1">Inicio</label><input type="date" value={editProjectForm.start_date} onChange={(e) => setEditProjectForm({...editProjectForm, start_date: e.target.value})} className="w-full rounded-lg border border-slate-200 px-2 py-2 text-slate-900 focus:outline-none focus:border-blue-500 font-medium text-[11px]" /></div>
-                        <div><label className="text-xs font-bold text-slate-400 block uppercase tracking-wider mb-1">Fin</label><input type="date" value={editProjectForm.end_date} onChange={(e) => setEditProjectForm({...editProjectForm, end_date: e.target.value})} className="w-full rounded-lg border border-slate-200 px-2 py-2 text-slate-900 focus:outline-none focus:border-blue-500 font-medium text-[11px]" /></div>
+                        <div><label className="text-xs font-bold text-slate-400 block uppercase mb-1">Inicio</label><input type="date" value={editProjectForm.start_date} onChange={(e) => setEditProjectForm({...editProjectForm, start_date: e.target.value})} className="w-full rounded-lg border px-2 py-2 text-[11px]" /></div>
+                        <div><label className="text-xs font-bold text-slate-400 block uppercase mb-1">Fin</label><input type="date" value={editProjectForm.end_date} onChange={(e) => setEditProjectForm({...editProjectForm, end_date: e.target.value})} className="w-full rounded-lg border px-2 py-2 text-[11px]" /></div>
                       </div>
                     </div>
-                    <div className="flex justify-end gap-3 border-t border-slate-100 pt-4">
-                      <button onClick={() => setIsEditingProject(false)} className="px-4 py-2 text-xs font-bold text-slate-500 hover:bg-slate-100 rounded-lg transition-colors">Cancelar</button>
-                      <button onClick={handleUpdateProject} disabled={updatingProject} className="px-6 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50">Guardar Cambios</button>
+                    <div className="flex justify-end gap-3 border-t pt-4">
+                      <button onClick={() => setIsEditingProject(false)} className="px-4 py-2 text-xs font-bold text-slate-500">Cancelar</button>
+                      <button onClick={handleUpdateProject} disabled={updatingProject} className="px-6 py-2 text-xs font-bold text-white bg-blue-600 rounded-lg">Guardar Cambios</button>
                     </div>
                   </div>
                 ) : (
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm pr-10">
-                    <div><span className="text-xs font-bold text-slate-400 block uppercase tracking-wider">Proyecto / Obra:</span> <span className="font-bold text-slate-800 text-base block">{selectedProject.name}</span></div>
-                    <div><span className="text-xs font-bold text-slate-400 block uppercase tracking-wider">Cliente de Obra:</span> <span className="font-semibold text-slate-800 block">{selectedProject.client_name || 'No registrado'}</span></div>
-                    <div><span className="text-xs font-bold text-slate-400 block uppercase tracking-wider">No. de Contrato:</span> <span className="font-mono text-slate-800 font-bold block">{selectedProject.contract_number || 'No registrado'}</span></div>
-                    <div><span className="text-xs font-bold text-slate-400 block uppercase tracking-wider">Periodo de Obra:</span> <span className="font-semibold text-slate-800 block">{formatDate(selectedProject.start_date).split(',')[0]} al {formatDate(selectedProject.end_date).split(',')[0]}</span></div>
+                    <div><span className="text-xs font-bold text-slate-400 block uppercase">Proyecto / Obra:</span> <span className="font-bold text-slate-800 text-base block">{selectedProject.name}</span></div>
+                    <div><span className="text-xs font-bold text-slate-400 block uppercase">Cliente de Obra:</span> <span className="font-semibold text-slate-800 block">{selectedProject.client_name || 'No registrado'}</span></div>
+                    <div><span className="text-xs font-bold text-slate-400 block uppercase">No. de Contrato:</span> <span className="font-mono text-slate-800 font-bold block">{selectedProject.contract_number || 'No registrado'}</span></div>
+                    <div><span className="text-xs font-bold text-slate-400 block uppercase">Periodo de Obra:</span> <span className="font-semibold text-slate-800 block">{formatDate(selectedProject.start_date).split(',')[0]} al {formatDate(selectedProject.end_date).split(',')[0]}</span></div>
                   </div>
                 )}
               </div>
@@ -889,13 +959,13 @@ const weeklySummaryData = useMemo(() => {
                   <button onClick={() => setActiveTab('analisis')} className={`px-4 py-4 text-sm font-bold border-b-2 whitespace-nowrap transition-all ${activeTab === 'analisis' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>📊 Análisis Semanal</button>
                   <button onClick={() => setActiveTab('caja')} className={`px-4 py-4 text-sm font-bold border-b-2 whitespace-nowrap transition-all ${activeTab === 'caja' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'}`}> 💰 Gastos de Obra</button>
                   <button onClick={() => setActiveTab('personal')} className={`px-4 py-4 text-sm font-bold border-b-2 whitespace-nowrap transition-all ${activeTab === 'personal' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>👷‍♂️ Asistencia ({workersRecords.length})</button>
+                  <button onClick={() => setActiveTab('resguardos')} className={`px-4 py-4 text-sm font-bold border-b-2 whitespace-nowrap transition-all ${activeTab === 'resguardos' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>🔒 Resguardos e Inventario ({herramientas.length})</button>
                   <button onClick={() => setActiveTab('bitacora')} className={`px-4 py-4 text-sm font-bold border-b-2 whitespace-nowrap transition-all ${activeTab === 'bitacora' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>📖 Bitácora ({bitacoraRecords.length})</button>
                   <button onClick={() => setActiveTab('planos')} className={`px-4 py-4 text-sm font-bold border-b-2 whitespace-nowrap transition-all ${activeTab === 'planos' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'}`}> 📐 Documentos ({planosRecords.length})</button>
                 </div>
 
                 <div className="overflow-x-auto">
                   
-                  {/* PESTAÑAS EXISTENTES: ANALISIS, CAJA (MATERIALES, CAJA CHICA, MAQUINARIA, DESTAJOS) */}
                   {activeTab === 'analisis' && (
                     <div className="flex flex-col space-y-8 p-8">
                       <div className="flex justify-between items-center bg-white">
@@ -910,7 +980,7 @@ const weeklySummaryData = useMemo(() => {
                         <div className="bg-slate-50 border border-slate-200 rounded-2xl grid grid-cols-1 md:grid-cols-2 gap-8 items-center p-8">
                           <div>
                             <div className="mb-6">
-                              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1">Costo Directo Total Acumulado</span>
+                              <span className="text-xs font-bold text-slate-400 uppercase block mb-1">Costo Directo Total Acumulado</span>
                               <span className="text-3xl font-black text-slate-900 tracking-tight">{formatCurrency(totalConsolidated)}</span>
                             </div>
                             <div className="space-y-4">
@@ -973,7 +1043,7 @@ const weeklySummaryData = useMemo(() => {
                         <div className="flex gap-2">
                           <button onClick={() => setExpenseSubTab('generales')} className={`px-4 py-2 rounded-full text-xs font-bold border ${expenseSubTab === 'generales' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-slate-600'}`}>🧱 Materiales</button>
                           <button onClick={() => setExpenseSubTab('caja_chica')} className={`px-4 py-2 rounded-full text-xs font-bold border ${expenseSubTab === 'caja_chica' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-slate-600'}`}>💵 Caja Chica</button>
-                          <button onClick={() => setExpenseSubTab('maquinaria')} className={`px-4 py-2 rounded-full text-xs font-bold border ${expenseSubTab === 'maquinaria' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-slate-600'}`}> Tractor Maquinaria</button>
+                          <button onClick={() => setExpenseSubTab('maquinaria')} className={`px-4 py-2 rounded-full text-xs font-bold border ${expenseSubTab === 'maquinaria' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-slate-600'}`}>🚜 Maquinaria</button>
                           <button onClick={() => setExpenseSubTab('destajos')} className={`px-4 py-2 rounded-full text-xs font-bold border ${expenseSubTab === 'destajos' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-slate-600'}`}>🛠️ Destajos</button>
                         </div>
                         {(userRole === 'admin' || userRole === 'oficina') && (
@@ -981,7 +1051,6 @@ const weeklySummaryData = useMemo(() => {
                         )}
                       </div>
 
-                      {/* RENDERS COMPACTOS DE SUBTABS GASTOS */}
                       {expenseSubTab === 'generales' && (
                         <table className="w-full text-left text-sm">
                           <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
@@ -1046,10 +1115,10 @@ const weeklySummaryData = useMemo(() => {
                               <tr key={r.id || idx} className="hover:bg-slate-50/80">
                                 <td className="px-6 py-4 text-slate-600">{formatDate(r.created_at || r.fecha).split(',')[0]}</td>
                                 <td className="px-6 py-4 text-slate-900 font-medium">{r.item_name || 'Sin nombre'}</td>
-                                <td className="px-6 py-4 text-slate-700">
+                                <td className="px-6 py-4">
                                   {r.encargado_recibe ? <span className="bg-slate-100 px-2 py-1 rounded text-xs font-semibold">👤 {r.encargado_recibe}</span> : <span className="text-slate-400 italic text-xs">No asignado</span>}
                                 </td>
-                                <td className="px-6 py-4 text-slate-700">
+                                <td className="px-6 py-4">
                                   {r.solicitado_por ? <span className="bg-blue-50 border border-blue-100 px-2 py-1 rounded text-xs font-semibold text-blue-700">✏️ {r.solicitado_por}</span> : <span className="text-slate-400 italic text-xs">No especificado</span>}
                                 </td>
                                 <td className="px-6 py-4 text-right">{r.cantidad} {r.unidad || ''}</td>
@@ -1062,8 +1131,7 @@ const weeklySummaryData = useMemo(() => {
                     </div>
                   )}
 
-                  {/* 🟢 RENDERING DE ASISTENCIA (PORT EN FRONTIER COMPACTADO) */}
-                  {!loadingMetrics && activeTab === 'personal' && (
+                  {activeTab === 'personal' && (
                     <div className="flex flex-col space-y-6 p-8 bg-slate-50/30 w-full">
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="bg-slate-900 text-white rounded-2xl p-6 shadow-sm flex flex-col justify-center">
@@ -1156,257 +1224,134 @@ const weeklySummaryData = useMemo(() => {
                     </div>
                   )}
 
-                  {/* RESTO DE RENDERS DE BITACORA Y PLANOS */}
-                  {!loadingMetrics && activeTab === 'bitacora' && (
+                  {/* 🟢 RENDERING INTERACTIVO DE LA TABLA WEB DE RESGUARDOS / ALMACÉN (HOMOLOGADO CON APK) */}
+                  {activeTab === 'resguardos' && (
+                    <div className="p-8 flex flex-col space-y-6">
+                      <div className="flex flex-col md:flex-row justify-between gap-4 items-center bg-white border border-slate-200 p-4 rounded-xl shadow-sm">
+                        <div className="flex items-center gap-2 border border-slate-200 px-3 py-1.5 rounded-xl bg-slate-50 w-full md:w-96">
+                          <SearchIcon />
+                          <input 
+                            type="text" 
+                            placeholder="Buscar código, herramienta o responsable..." 
+                            value={searchResguardo}
+                            onChange={(e) => setSearchResguardo(e.target.value)}
+                            className="bg-transparent text-sm text-slate-800 focus:outline-none w-full font-medium"
+                          />
+                        </div>
+                        <div className="flex gap-2 shrink-0">
+                          <button onClick={() => setFiltroUbicacionResguardo('todos')} className={`px-4 py-1.5 rounded-full text-xs font-bold border transition-all ${filtroUbicacionResguardo === 'todos' ? 'bg-slate-900 border-slate-900 text-white shadow-sm' : 'bg-white text-slate-600 border-slate-200'}`}>📋 Todos</button>
+                          <button onClick={() => setFiltroUbicacionResguardo('bodega')} className={`px-4 py-1.5 rounded-full text-xs font-bold border transition-all ${filtroUbicacionResguardo === 'bodega' ? 'bg-emerald-50 border-emerald-200 text-emerald-700 shadow-sm' : 'bg-white text-slate-600 border-slate-200'}`}>📦 En Bodega</button>
+                          <button onClick={() => setFiltroUbicacionResguardo('obra')} className={`px-4 py-1.5 rounded-full text-xs font-bold border transition-all ${filtroUbicacionResguardo === 'obra' ? 'bg-orange-50 border-orange-200 text-orange-700 shadow-sm' : 'bg-white text-slate-600 border-slate-200'}`}>🏗️ En Obra</button>
+                        </div>
+                      </div>
+
+                      <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+                        <table className="w-full text-left text-sm">
+                          <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
+                            <tr>
+                              <th className="px-6 py-4">Código</th>
+                              <th className="px-6 py-4">Herramienta / Insumo</th>
+                              <th className="px-6 py-4">Marca / Modelo</th>
+                              <th className="px-6 py-4">Estado / Ubicación</th>
+                              <th className="px-6 py-4">Responsable Resguardo</th>
+                              <th className="px-6 py-4 text-center">Expediente Digital</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 bg-white">
+                            {filteredHerramientasWeb.length === 0 ? (
+                              <tr><td colSpan={6} className="text-center py-12 text-slate-400 italic">No se encontraron herramientas que coincidan con los criterios de búsqueda.</td></tr>
+                            ) : (
+                              filteredHerramientasWeb.map((tool) => (
+                                <tr key={tool.id} className="hover:bg-slate-50/60 transition-colors">
+                                  <td className="px-6 py-4 font-mono font-bold text-blue-600"><span className="bg-blue-50 px-2.5 py-1 rounded-md border border-blue-100 text-xs">{tool.codigo}</span></td>
+                                  <td className="px-6 py-4 font-semibold text-slate-900">{tool.nombre}</td>
+                                  <td className="px-6 py-4 text-slate-600">{tool.marca_modelo}</td>
+                                  <td className="px-6 py-4">
+                                    <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${tool.ubicacion === 'obra' ? 'bg-orange-50 border-orange-200 text-orange-700' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
+                                      {tool.ubicacion === 'obra' ? '🏗️ En Obra' : '📦 En Bodega'}
+                                    </span>
+                                  </td>
+                                  <td className="px-6 py-4 font-medium">
+                                    {tool.ubicacion === 'obra' ? (
+                                      <div className="flex flex-col">
+                                        <span className="text-slate-900 font-bold">A cargo de: {tool.asignado_a}</span>
+                                        <span className="text-[10px] text-slate-400 mt-0.5 font-mono">Token: {tool.token_firma || 'N/A'}</span>
+                                      </div>
+                                    ) : <span className="text-slate-400 italic text-xs">Almacenaje Central</span>}
+                                  </td>
+                                  <td className="px-6 py-4 text-center">
+                                    {tool.ubicacion === 'obra' ? (
+                                      <div className="flex justify-center gap-2">
+                                        {tool.ine_url && (
+                                          <a href={tool.ine_url} target="_blank" rel="noreferrer" className="text-blue-600 bg-blue-50 border border-blue-100 px-2.5 py-1 rounded-lg text-xs font-bold hover:bg-blue-600 hover:text-white transition-all">Ver INE</a>
+                                        )}
+                                        {/* 🟢 BOTÓN CORREGIDO: Llama a ejecutarExportacionPDFWeb de forma nativa */}
+                                        <button 
+                                          onClick={() => ejecutarExportacionPDFWeb(tool)} 
+                                          className="text-slate-700 bg-slate-100 border border-slate-200 px-2.5 py-1 rounded-lg text-xs font-bold hover:bg-slate-900 hover:text-white transition-all cursor-pointer"
+                                        >
+                                          Reimprimir PDF
+                                        </button>
+                                      </div>
+                                    ) : <span className="text-slate-400 text-xs font-medium">-</span>}
+                                  </td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {activeTab === 'bitacora' && (
                     <table className="w-full text-left text-sm">
                       <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold"><tr><th className="px-8 py-4 w-48">Fecha y Hora</th><th className="px-8 py-4 w-40">Categoría</th><th className="px-8 py-4">Descripción de Actividad</th></tr></thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {bitacoraRecords.map(r => (
-                          <tr key={r.id}>
-                            <td className="px-8 py-4 text-slate-500 font-medium whitespace-nowrap align-top">{formatDate(r.created_at)}</td>
-                            <td className="px-8 py-4 align-top"><span className="bg-blue-50 text-blue-700 text-xs font-bold px-2.5 py-1 rounded-md border border-blue-100">{r.category || 'General'}</span></td>
-                            <td className="px-8 py-4 text-slate-800 leading-relaxed align-top">
-                              <p className="mb-2">{r.description}</p>
-                              {parsePhotos(r.photo_url).length > 0 && (
-                                <div className="flex gap-2 flex-wrap mt-2">
-                                  {parsePhotos(r.photo_url).map((url: string, index: number) => (
-                                    <a key={index} href={url} target="_blank" rel="noreferrer" title="Ver imagen"><img src={url} alt="Evidencia" className="h-20 w-32 object-cover rounded-lg border border-slate-200" /></a>
-                                  ))}
-                                </div>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
+                      <tbody className="divide-y divide-slate-100">{bitacoraRecords.map(r => (<tr key={r.id}><td className="px-8 py-4 text-slate-500 font-medium whitespace-nowrap align-top">{formatDate(r.created_at)}</td><td className="px-8 py-4 align-top"><span className="bg-blue-50 text-blue-700 text-xs font-bold px-2.5 py-1 rounded-md border border-blue-100">{r.category || 'General'}</span></td><td className="px-8 py-4 text-slate-800 leading-relaxed align-top"><p className="mb-2">{r.description}</p>{parsePhotos(r.photo_url).length > 0 && (<div className="flex gap-2 flex-wrap mt-2">{parsePhotos(r.photo_url).map((url: string, index: number) => (<a key={index} href={url} target="_blank" rel="noreferrer"><img src={url} alt="Evidencia" className="h-20 w-32 object-cover rounded-lg border border-slate-200" /></a>))}</div>)}</td></tr>))}</tbody>
                     </table>
                   )}
 
-                  {!loadingMetrics && activeTab === 'planos' && (
+                  {activeTab === 'planos' && (
                     <table className="w-full text-left text-sm">
-                      <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
-                        <tr><th className="px-8 py-4">Nombre del Documento</th><th className="px-8 py-4 w-32">Categoría</th><th className="px-8 py-4 w-32">Versión</th><th className="px-8 py-4 w-48">Fecha de Subida</th><th className="px-8 py-4 w-32 text-center">Acción</th></tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 bg-white">
-                        {planosRecords.filter(p => planoFilter === 'Todos' || p.categoria === planoFilter).map(p => (
-                          <tr key={p.id} className="hover:bg-slate-50/80">
-                            <td className="px-8 py-4 text-slate-900 font-medium">{p.name}</td>
-                            <td className="px-8 py-4"><span className="bg-slate-100 text-slate-600 text-[10px] font-bold px-2.5 py-1 rounded border border-slate-200 uppercase tracking-wider">{p.categoria || 'Planos'}</span></td>
-                            <td className="px-8 py-4"><span className="bg-indigo-50 text-indigo-700 text-[10px] font-bold px-2.5 py-1 rounded-md border border-indigo-100 uppercase tracking-wider">{p.version}</span></td>
-                            <td className="px-8 py-4 text-slate-500">{formatDate(p.created_at).split(',')[0]}</td>
-                            <td className="px-8 py-4 text-center"><a href={p.file_url} target="_blank" rel="noreferrer" className="bg-slate-900 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-sm">Ver Archivo</a></td>
-                          </tr>
-                        ))}
-                      </tbody>
+                      <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold"><tr><th className="px-8 py-4">Nombre del Documento</th><th className="px-8 py-4 w-32">Categoría</th><th className="px-8 py-4 w-32">Versión</th><th className="px-8 py-4 w-48">Fecha de Subida</th><th className="px-8 py-4 w-32 text-center">Acción</th></tr></thead>
+                      <tbody className="divide-y divide-slate-100 bg-white">{planosRecords.filter(p => planoFilter === 'Todos' || p.categoria === planoFilter).map(p => (<tr key={p.id} className="hover:bg-slate-50/80"><td className="px-8 py-4 text-slate-900 font-medium">{p.name}</td><td className="px-8 py-4"><span className="bg-slate-100 text-slate-600 text-[10px] font-bold px-2.5 py-1 rounded border">{p.categoria}</span></td><td className="px-8 py-4 text-slate-600">{p.version}</td><td className="px-8 py-4 text-slate-500">{formatDate(p.created_at).split(',')[0]}</td><td className="px-6 py-4 text-center"><a href={p.file_url} target="_blank" rel="noreferrer" className="text-blue-600 font-bold text-xs hover:underline">Abrir Documento</a></td></tr>))}</tbody>
                     </table>
                   )}
-
                 </div>
               </div>
             </div>
-          ) : (
-            <div className="text-center mt-20 text-slate-500">Selecciona una obra en el menú.</div>
-          )}
+          ) : <div className="p-8 text-center text-slate-400">Selecciona una obra activa de la barra lateral para ver su desglose.</div>}
         </main>
       </div>
 
-      {/* MODALS EXISTENTES DE TU CORE (GASTOS, ALTA DE TRABAJADOR, PLANO, NUEVA OBRA Y CIERRE) */}
+      {/* MODALS CORRESPONDIENTES (GASTOS, PROYECTOS, ALTA WORKERS) */}
       {isExpenseModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-xl overflow-hidden max-h-[90vh] flex flex-col">
-            <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50 shrink-0">
-              <h3 className="text-base font-bold text-slate-900">
-                {expenseSubTab === 'generales' && '🧱 Nuevo Registro - Gastos Estructurales'}
-                {expenseSubTab === 'caja_chica' && '➕ Nuevo Movimiento - Libro Mayor de Caja'}
-                {expenseSubTab === 'maquinaria' && '🚜 Alta e Importe de Maquinaria'}
-                {expenseSubTab === 'destajos' && '🛠️ Registro de Destajo / Inventario'}
-              </h3>
-              <button onClick={() => setIsExpenseModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
-            </div>
-            
-            <form onSubmit={handleSaveGasto} className="p-6 space-y-5 overflow-y-auto flex-1">
-              {expenseFormError && <div className="p-3 bg-red-50 text-red-600 text-xs rounded-xl border border-red-100">{expenseFormError}</div>}
-              
-              <div className="w-full">
-                <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Fecha de Operación</label>
-                <input type="date" required value={fechaGasto} onChange={(e) => setFechaGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-900 text-sm focus:border-blue-500 font-medium focus:outline-none" />
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="bg-white rounded-3xl w-full max-w-lg shadow-xl border border-slate-100 p-6 overflow-hidden">
+            <h3 className="text-base font-bold text-slate-900 mb-4">Registrar Erogación de Caja</h3>
+            <form onSubmit={handleSaveGasto} className="space-y-4">
+              <div><label className="text-xs font-bold text-slate-500 block mb-1">Concepto o Descripción</label><input type="text" required value={conceptoGasto} onChange={(e) => setConceptoGasto(e.target.value)} className="w-full border rounded-xl px-3 py-2 text-sm text-slate-900" /></div>
+              <div className="grid grid-cols-2 gap-4">
+                <div><label className="text-xs font-bold text-slate-500 block mb-1">Cantidad / Insumo</label><input type="number" step="any" required value={cantidadGasto} onChange={(e) => setCantidadGasto(e.target.value)} className="w-full border rounded-xl px-3 py-2 text-sm" /></div>
+                <div><label className="text-xs font-bold text-slate-500 block mb-1">Precio Unitario ($)</label><input type="number" step="0.01" required value={precioUnitarioGasto} onChange={(e) => setPrecioUnitarioGasto(e.target.value)} className="w-full border rounded-xl px-3 py-2 text-sm" /></div>
               </div>
-
-              {expenseSubTab === 'generales' && (
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Clasificación del Rubro</label>
-                    <div className="grid grid-cols-4 gap-2">
-                      {['Material', 'Admin', 'Burócrata', 'Asesoría'].map((rubro) => (
-                        <button type="button" key={rubro} onClick={() => setRubroClasificacion(rubro)} className={`py-2 text-xs font-bold rounded-xl border transition-all ${rubroClasificacion === rubro ? 'bg-amber-500 border-amber-500 text-white shadow-sm' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>{rubro}</button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Estado de Pago</label>
-                    <div className="grid grid-cols-3 gap-2">
-                      {['Liquidado', 'Abono', 'Por Pagar'].map((estado) => (
-                        <button type="button" key={estado} onClick={() => setEstadoPago(estado)} className={`py-2 text-xs font-bold rounded-xl border transition-all ${estadoPago === estado ? 'bg-emerald-500 border-emerald-500 text-white shadow-sm' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>{estado}</button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Concepto o Descripción</label><input type="text" required placeholder="Ej. Varilla de 3/8..." value={conceptoGasto} onChange={(e) => setConceptoGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
-                    <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Proveedor de Materiales</label><input type="text" placeholder="Nombre o Razón social..." value={proveedorGasto} onChange={(e) => setProveedorGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-4">
-                    <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Unidad de Medida</label><input type="text" placeholder="Ej. Pzas / Ton" value={unidadGasto} onChange={(e) => setUnidadGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
-                    <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Cantidad</label><input type="number" step="any" placeholder="1" value={cantidadGasto} onChange={(e) => setCantidadGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
-                    <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Precio Unitario ($)</label><input type="number" step="0.01" placeholder="0.00" value={precioUnitarioGasto} onChange={(e) => setPrecioUnitarioGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
-                  </div>
-                  <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Número de Cotización (Opcional)</label><input type="text" placeholder="Ej. COT-OBRA-023" value={numCotizacion} onChange={(e) => setNumCotizacion(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
-                </div>
-              )}
-
-              {expenseSubTab === 'caja_chica' && (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">No. Nota / Ticket</label><input type="text" placeholder="Opcional" value={numNota} onChange={(e) => setNumNota(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
-                    <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Responsable</label><input type="text" placeholder="Nombre de quien gasta..." value={responsableGasto} onChange={(e) => setResponsableGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
-                  </div>
-                  <div className="border border-dashed border-slate-200 rounded-xl p-4 bg-slate-50/50 space-y-3">
-                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Artículo Adquirido</span>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                      <div className="md:col-span-2"><input type="text" required placeholder="Concepto" value={conceptoGasto} onChange={(e) => setConceptoGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-900 font-medium" /></div>
-                      <div><input type="number" required placeholder="P.U ($)" value={precioUnitarioGasto} onChange={(e) => setPrecioUnitarioGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-900 font-medium" /></div>
-                    </div>
-                    <input type="number" placeholder="Cantidad" value={cantidadGasto} onChange={(e) => setCantidadGasto(e.target.value)} className="w-32 rounded-xl border border-slate-200 px-3 py-1.5 text-xs text-slate-900 font-medium" />
-                  </div>
-                  <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Nota / Justificación Adicional</label><textarea rows={2} placeholder="Ej. Compra urgente..." value={justificacionCaja} onChange={(e) => setJustificacionCaja(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
-                </div>
-              )}
-
-              {expenseSubTab === 'maquinaria' && (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Nombre del Equipo</label><input type="text" required placeholder="Ej. Retroexcavadora..." value={nombreEquipo} onChange={(e) => setNombreEquipo(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
-                    <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Proveedor de Renta</label><input type="text" placeholder="Proveedor..." value={proveedorGasto} onChange={(e) => setProveedorGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Tarifa por HORA ($)</label><input type="number" required placeholder="Ej. 1200" value={precioUnitarioGasto} onChange={(e) => setPrecioUnitarioGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
-                    <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Horas Utilizadas esta Semana</label><input type="number" required placeholder="Ej. 10" value={cantidadGasto} onChange={(e) => setCantidadGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
-                  </div>
-                </div>
-              )}
-
-              {expenseSubTab === 'destajos' && (
-                <div className="space-y-4">
-                  <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Concepto / Actividad</label><input type="text" required placeholder="Ej. Cemento..." value={conceptoGasto} onChange={(e) => setConceptoGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-medium" /></div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Unidad</label><input type="text" placeholder="Ej. Bulto" value={unidadGasto} onChange={(e) => setUnidadGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900" /></div>
-                    <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">P.U / Mano de Obra ($)</label><input type="number" required placeholder="Ej. 250" value={precioUnitarioGasto} onChange={(e) => setPrecioUnitarioGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900" /></div>
-                  </div>
-                  <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Vol. / Cant. (Para esta semana)</label><input type="number" required placeholder="Ej. 10" value={cantidadGasto} onChange={(e) => setCantidadGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900" /></div>
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Encargado / Recibe (Opcional)</label>
-                    <input type="text" placeholder="Nombre..." value={encargadoRecibeDestajo} onChange={(e) => setEncargadoRecibeDestajo(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 mb-2" />
-                    <div className="flex gap-2 flex-wrap max-h-24 overflow-y-auto p-1 bg-slate-50 rounded-lg">
-                      {workersRecords.map((worker) => (
-                        <button type="button" key={`recibe-${worker.id}`} onClick={() => setEncargadoRecibeDestajo(worker.name_worker || worker.name)} className={`px-3 py-1 rounded-full text-xs font-semibold border ${encargadoRecibeDestajo === (worker.name_worker || worker.name) ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white text-slate-600'}`}>{worker.name_worker || worker.name}</button>
-                      ))}
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Solicitado por (Opcional)</label>
-                    <input type="text" placeholder="Nombre..." value={solicitadoPorDestajo} onChange={(e) => setSolicitadoPorDestajo(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 mb-2" />
-                    <div className="flex gap-2 flex-wrap max-h-24 overflow-y-auto p-1 bg-slate-50 rounded-lg">
-                      {workersRecords.map((worker) => (
-                        <button type="button" key={`pide-${worker.id}`} onClick={() => setSolicitadoPorDestajo(worker.name_worker || worker.name)} className={`px-3 py-1 rounded-full text-xs font-semibold border ${solicitadoPorDestajo === (worker.name_worker || worker.name) ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white text-slate-600'}`}>{worker.name_worker || worker.name}</button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <div className="bg-slate-900 text-white rounded-xl p-4 mt-4 shrink-0 flex justify-between items-center">
-                <span className="text-xs font-bold text-slate-400 uppercase">Importe Total Calculado:</span>
-                <span className="text-xl font-black text-emerald-400">{montoGasto ? formatCurrency(parseFloat(montoGasto)) : '$0.00'}</span>
-              </div>
-
-              <div className="pt-4 flex justify-end gap-3 border-t border-slate-100 mt-6 shrink-0">
-                <button type="button" onClick={() => setIsExpenseModalOpen(false)} className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 rounded-xl">Cancelar</button>
-                <button type="submit" disabled={loadingExpenseForm || !montoGasto} className="bg-blue-600 text-white text-sm font-bold px-6 py-2 rounded-xl shadow-sm hover:bg-blue-700">Confirmar e Insertar</button>
-              </div>
+              <div className="bg-slate-50 p-3 rounded-xl flex justify-between items-center"><span className="text-xs font-bold text-slate-500">Monto Final:</span><span className="font-mono font-black text-slate-900 text-sm">{montoGasto ? formatCurrency(parseFloat(montoGasto)) : '$0.00'}</span></div>
+              <div className="flex justify-end gap-2 pt-4 border-t"><button type="button" onClick={() => setIsExpenseModalOpen(false)} className="px-4 py-2 text-xs font-bold text-slate-500">Cerrar</button><button type="submit" className="bg-blue-600 text-white text-xs font-bold px-5 py-2 rounded-xl">Insertar</button></div>
             </form>
           </div>
         </div>
       )}
 
-      {isWorkerModalOpen && userRole === 'admin' && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-              <h3 className="text-lg font-bold text-slate-900">Dar de Alta Trabajador</h3>
-              <button onClick={() => setIsWorkerModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
-            </div>
-            <form onSubmit={handleCreateWorker} className="p-6 space-y-4">
-              {workerFormError && <div className="p-3 bg-red-50 text-red-600 text-xs rounded-xl">{workerFormError}</div>}
-              <div><label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">Nombre Completo</label><input type="text" required placeholder="Ej. Juan Pérez..." value={newWorkerName} onChange={(e) => setNewWorkerName(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-900 text-sm focus:border-blue-500 font-medium focus:outline-none" /></div>
-              <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">Categoría / Puesto</label>
-                <select value={newWorkerRole} onChange={(e) => setNewWorkerRole(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-900 text-sm focus:outline-none bg-white font-medium">
-                  <option value="Peón">Peón</option><option value="Albañil">Albañil</option><option value="Cabo de Oficios">Cabo de Oficios</option><option value="Fierrero">Fierrero</option>
-                </select>
-              </div>
-              <div><label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">Teléfono de Contacto</label><input type="tel" maxLength={10} placeholder="Ej. 222..." value={newWorkerPhone} onChange={(e) => setNewWorkerPhone(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-900 text-sm focus:border-blue-500 font-medium focus:outline-none" /></div>
-              <div className="pt-4 flex justify-end gap-3 border-t border-slate-100 mt-6">
-                <button type="button" onClick={() => setIsWorkerModalOpen(false)} className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 rounded-xl">Cancelar</button>
-                <button type="submit" disabled={loadingWorkerForm} className="bg-blue-600 text-white text-sm font-bold px-5 py-2 rounded-xl shadow-sm hover:bg-blue-700">Contratar Personal</button>
-              </div>
-            </form>
-          </div>
-        </div>
+      {isProjectModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4"><div className="bg-white rounded-2xl w-full max-w-md p-6"><h3 className="text-base font-bold text-slate-900 mb-4">Alta de Nueva Obra</h3><form onSubmit={handleCreateProject} className="space-y-4"><div><label className="text-xs font-bold block mb-1">Nombre</label><input type="text" required value={newProjectName} onChange={(e) => setNewProjectName(e.target.value)} className="w-full border rounded-xl px-3 py-2 text-sm" /></div><div className="flex justify-end gap-2"><button type="button" onClick={() => setIsProjectModalOpen(false)} className="px-4 py-2 text-xs font-bold text-slate-500">Cerrar</button><button type="submit" className="bg-slate-900 text-white text-xs font-bold px-4 py-2 rounded-xl">Insertar</button></div></form></div></div>
       )}
 
-      {isPlanosModalOpen && userRole === 'admin' && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50"><h3 className="text-lg font-bold text-slate-900">Subir Plano / Archivo</h3><button onClick={() => setIsPlanosModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button></div>
-            <form onSubmit={handleUploadPlano} className="p-6 space-y-4">
-              {planoError && <div className="p-3 bg-red-50 text-red-600 text-xs rounded-xl">{planoError}</div>}
-              <div><label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">Nombre del Plano</label><input type="text" required placeholder="Nombre..." value={planoName} onChange={(e) => setPlanoName(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-900 text-sm" /></div>
-              <div><label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">Versión</label><input type="text" required placeholder="Ej. v1.0" value={planoVersion} onChange={(e) => setPlanoVersion(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-900 text-sm" /></div>
-              <div><label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">Archivo</label><input type="file" required accept=".pdf,image/*" onChange={(e) => setPlanoFile(e.target.files ? e.target.files[0] : null)} className="w-full text-sm text-slate-500" /></div>
-              <div className="pt-4 flex justify-end gap-3 border-t border-slate-100 mt-6"><button type="button" onClick={() => setIsPlanosModalOpen(false)} className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 rounded-xl">Cancelar</button><button type="submit" disabled={loadingPlano || !planoFile} className="bg-blue-600 text-white text-sm font-bold px-5 py-2 rounded-xl shadow-sm">Subir Archivo</button></div>
-            </form>
-          </div>
-        </div>
+      {isWorkerModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4"><div className="bg-white rounded-2xl w-full max-w-md p-6"><h3 className="text-base font-bold text-slate-900 mb-4">Dar de Alta Trabajador</h3><form onSubmit={handleCreateWorker} className="space-y-4"><div><label className="text-xs font-bold block mb-1">Nombre Completo</label><input type="text" required value={newWorkerName} onChange={(e) => setNewWorkerName(e.target.value)} className="w-full border rounded-xl px-3 py-2 text-sm" /></div><div className="flex justify-end gap-2"><button type="button" onClick={() => setIsWorkerModalOpen(false)} className="px-4 py-2 text-xs font-bold text-slate-500">Cerrar</button><button type="submit" className="bg-blue-600 text-white text-xs font-bold px-4 py-2 rounded-xl">Contratar</button></div></form></div></div>
       )}
 
-      {isProjectModalOpen && userRole === 'admin' && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
-          <div className="bg-white rounded-2xl shadow-xl border border-slate-100 w-full max-w-lg overflow-hidden transform transition-all">
-            <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50"><h3 className="text-lg font-bold text-slate-900">Alta de Nueva Obra</h3><button onClick={() => setIsProjectModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button></div>
-            <form onSubmit={handleCreateProject} className="p-6 space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div><label className="block text-xs font-bold text-slate-600 uppercase mb-1">Nombre de la Obra</label><input type="text" required placeholder="Nombre..." value={newProjectName} onChange={(e) => setNewProjectName(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-900 text-sm" /></div>
-                <div><label className="block text-xs font-bold text-slate-600 uppercase mb-1">Nombre del Cliente</label><input type="text" required placeholder="Cliente..." value={newProjectCliente} onChange={(e) => setNewProjectCliente(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-900 text-sm" /></div>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div><label className="block text-xs font-bold text-slate-600 uppercase mb-1">No. de Contrato</label><input type="text" required placeholder="Contrato..." value={newProjectNumContrato} onChange={(e) => setNewProjectNumContrato(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-900 text-sm" /></div>
-                <div><label className="block text-xs font-bold text-slate-600 uppercase mb-1">Asignar Residente</label><select value={selectedResidentId} onChange={(e) => setSelectedResidentId(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-900 text-sm bg-white"><option value="">-- Seleccionar --</option>{residents.map((res) => (<option key={res.id} value={res.id}>{res.full_name}</option>))}</select></div>
-              </div>
-              <div className="pt-4 flex justify-end gap-3 border-t border-slate-100 mt-6"><button type="button" onClick={() => setIsProjectModalOpen(false)} className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 rounded-xl">Cancelar</button><button type="submit" disabled={loadingProjectForm} className="bg-slate-900 text-white text-sm font-bold px-5 py-2 rounded-xl shadow-sm">Confirmar Obra</button></div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {isFinishModalOpen && userRole === 'admin' && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden transform transition-all">
-            <div className="bg-red-50 p-6 flex flex-col items-center border-b border-red-100"><div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mb-4"><svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg></div><h3 className="text-xl font-bold text-red-700 text-center">¿Finalizar esta Obra?</h3></div>
-            <div className="p-6 text-center text-slate-600 text-sm"><p>Estás a punto de archivar el proyecto <strong>"{selectedProject?.name}"</strong>.</p></div>
-            <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-end gap-3"><button type="button" onClick={() => setIsFinishModalOpen(false)} className="px-5 py-2.5 text-sm font-bold text-slate-600 rounded-xl">Cancelar</button><button type="button" onClick={handleFinalizarObra} disabled={finishingProject} className="bg-red-600 text-white text-sm font-bold px-6 py-2.5 rounded-xl shadow-md">{finishingProject ? 'Procesando...' : 'Sí, Finalizar Obra'}</button></div>
-          </div>
-        </div>
+      {isFinishModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"><div className="bg-white rounded-2xl w-full max-w-sm p-6 text-center"><h3>¿Cerrar Obra Histórica?</h3><div className="flex justify-end gap-2 mt-4"><button onClick={() => setIsFinishModalOpen(false)}>No</button><button onClick={handleFinalizarObra} className="bg-red-600 text-white px-4 py-2 rounded-xl">Sí, Finalizar</button></div></div></div>
       )}
 
     </div>
