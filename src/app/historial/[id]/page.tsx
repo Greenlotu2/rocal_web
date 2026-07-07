@@ -160,7 +160,7 @@ export default function ReporteFinalObraPage({ params }: { params: Promise<{ id:
     return Object.values(semanas).sort((a, b) => b.fechaRepresentativa.getTime() - a.fechaRepresentativa.getTime());
   }, [inventoryRecords]);
 
-  // --- 📝 GENERACIÓN DE REPORTE AUDITADO EXTENDIDO ---
+  // --- 📝 GENERACIÓN DE REPORTE AUDITADO ÚNICO ---
   const handleExportDetailedPDF = async () => {
     if (!proyecto) return;
     setExportingPDF(true);
@@ -202,18 +202,16 @@ export default function ReporteFinalObraPage({ params }: { params: Promise<{ id:
 
       let nextY = (doc as any).lastAutoTable.finalY + 12;
 
-// 2. AUDITORÍA DETALLADA: GASTOS GENERALES POR SUBRUBROS (CORREGIDO SIN EMOJIS Y CON COLUMNA CORRECTA)
+      // 2. AUDITORÍA DETALLADA: GASTOS GENERALES POR SUBRUBROS
       if (gastosGeneralesRecords.length > 0) {
         if (nextY > 240) { doc.addPage(); nextY = 20; }
         doc.setFontSize(12); doc.setTextColor(15, 23, 42); doc.setFont('Helvetica', 'bold');
         doc.text('2. Desglose de Gastos Generales por Clasificación Contable', 14, nextY);
         nextY += 6;
 
-        // Lista de subrubros exactos que inyectamos en la base de datos
         const subrubros = ['Burócrata', 'Admin', 'Asesoría', 'Material'];
         
         subrubros.forEach(sub => {
-          // 🔑 CORREGIDO: Ahora sí filtramos usando r.categoria
           const registrosFiltrados = gastosGeneralesRecords.filter(r => r.categoria === sub);
           
           let pagado = 0;
@@ -233,11 +231,9 @@ export default function ReporteFinalObraPage({ params }: { params: Promise<{ id:
           if (registrosFiltrados.length > 0) {
             if (nextY > 240) { doc.addPage(); nextY = 20; }
             
-            // Mapeo de nombres limpios para las cabeceras sin emojis corruptos
             const nombreMostrar = sub === 'Material' ? 'Materiales' : sub === 'Admin' ? 'Administrativos' : sub === 'Burócrata' ? 'Burocratas' : 'Asesorias';
 
             doc.setFontSize(10); doc.setTextColor(30, 41, 59); doc.setFont('Helvetica', 'bold');
-            // 🔑 CORREGIDO: Título limpio sin emojis que rompan el texto
             doc.text(`Subrubro: ${nombreMostrar}  |  Total: ${formatCurrency(saldoTotalRubro)}`, 14, nextY);
 
             autoTable(doc, {
@@ -273,7 +269,6 @@ export default function ReporteFinalObraPage({ params }: { params: Promise<{ id:
         let totalGastosCaja = 0;
 
         cajaChicaRecords.forEach(r => {
-          // Si el concepto contiene inversión o fue catalogado como tal en tu lógica móvil
           if (r.concepto?.toLowerCase().includes('inversión') || r.concepto?.toLowerCase().includes('ingreso')) {
             totalIngresosCaja += Number(r.monto || 0);
           } else {
@@ -316,7 +311,7 @@ export default function ReporteFinalObraPage({ params }: { params: Promise<{ id:
       if (maquinariaRecords.length > 0) {
         if (nextY > 240) { doc.addPage(); nextY = 20; }
         doc.setFontSize(12); doc.setTextColor(15, 23, 42); doc.setFont('Helvetica', 'bold');
-        doc.text('4. Estado Cuenta de Maquinaria Rallada (Abonos y Saldos)', 14, nextY);
+        doc.text('4. Estado Cuenta de Maquinaria Rentada (Abonos y Saldos)', 14, nextY);
 
         let totalAbonadoMaq = 0;
         let deudaAcumuladaMaq = 0;
@@ -357,8 +352,7 @@ export default function ReporteFinalObraPage({ params }: { params: Promise<{ id:
         nextY = (doc as any).lastAutoTable.finalY + 12;
       }
 
-      
-// 5. Destajos Semanales (Mano de obra + Destajos integrados de forma limpia)
+      // 5. Destajos Semanales (Mano de obra + Destajos integrados de forma limpia)
       if (destajosAgrupadosPorSemana.length > 0) {
         if (nextY > 230) { doc.addPage(); nextY = 20; }
         doc.setFontSize(12); doc.setTextColor(15, 23, 42); doc.setFont('Helvetica', 'bold');
@@ -377,7 +371,6 @@ export default function ReporteFinalObraPage({ params }: { params: Promise<{ id:
           const totalRayaSemana = rayaDeLaSemana.reduce((sum, p) => sum + Number(p.final_salary || 0), 0);
           const balanceGlobalSemanal = bloque.subtotalSemana + totalRayaSemana;
 
-          // 🔑 CORREGIDO: Cabecera limpia y estilizada de la semana para evitar encimamientos
           doc.setFontSize(10); doc.setTextColor(30, 41, 59); doc.setFont('Helvetica', 'bold');
           doc.text(`${bloque.claveSemana}`, 14, nextY);
           
@@ -391,7 +384,7 @@ export default function ReporteFinalObraPage({ params }: { params: Promise<{ id:
           
           bloque.registros.forEach(dest => {
             filasTabla.push([
-              'DESTAJO', // 🔑 CORREGIDO: Quitamos el emoji para evitar caracteres Ø=þàþ
+              'DESTAJO', 
               dest.name || 'Insumo',
               `Recibe: ${dest.in_charge || '-'}`,
               `${dest.quantity || 1} pz`,
@@ -402,7 +395,7 @@ export default function ReporteFinalObraPage({ params }: { params: Promise<{ id:
           rayaDeLaSemana.forEach(ray => {
             const worker = workersRecords.find(w => w.id === ray.worker_id);
             filasTabla.push([
-              'MANO DE OBRA', // 🔑 CORREGIDO: Quitamos el emoji
+              'MANO DE OBRA', 
               worker?.name_worker || worker?.name || 'Personal',
               ray.role || 'Obrero',
               ray.deduction_reason ? `Deducción: ${ray.deduction_reason}` : 'Asistencia Completa',
@@ -411,7 +404,7 @@ export default function ReporteFinalObraPage({ params }: { params: Promise<{ id:
           });
 
           autoTable(doc, {
-            startY: nextY + 8, // 🔑 CORREGIDO: Le damos más margen hacia abajo para que no choque con los textos superiores
+            startY: nextY + 8, 
             head: [['Rubro', 'Concepto / Colaborador', 'Detalle / Puesto', 'Vol / Asistencia', 'Costo Neto']],
             body: filasTabla,
             theme: 'grid',
@@ -428,7 +421,7 @@ export default function ReporteFinalObraPage({ params }: { params: Promise<{ id:
       doc.save(`Reporte_Maestro_Auditorado_${projectName.replace(/\s+/g, '_')}.pdf`);
     } catch (err: any) {
       alert("Error al estructurar el reporte extendido: " + err.message);
-    } finally {
+    } final_metrics: {
       setExportingPDF(false);
     }
   };
@@ -501,24 +494,15 @@ export default function ReporteFinalObraPage({ params }: { params: Promise<{ id:
                 </div>
               </div>
 
+              {/* 🔑 MODIFICADO: Unificamos a un solo botón borrando el enlace al PDF original del Storage */}
               <div className="mt-6 pt-6 border-t border-slate-100 flex justify-end gap-3">
                 <button
                   onClick={handleExportDetailedPDF}
                   disabled={exportingPDF}
                   className="flex items-center gap-2 bg-blue-600 text-white text-sm font-bold px-5 py-2.5 rounded-xl hover:bg-blue-700 transition-colors shadow-sm disabled:opacity-50 cursor-pointer"
                 >
-                  📥 {exportingPDF ? 'Procesando Auditoría...' : 'Imprimir Reporte Detallado (Maestro)'}
+                  📥 {exportingPDF ? 'Procesando Auditoría...' : 'Imprimir Reporte Detallado'}
                 </button>
-                {proyecto.reporte_cierre_url && (
-                  <a
-                    href={proyecto.reporte_cierre_url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex items-center gap-2 bg-slate-900 text-white text-sm font-bold px-5 py-2.5 rounded-xl hover:bg-slate-800 transition-colors shadow-sm"
-                  >
-                    📝 Ver Acta de Cierre (PDF original)
-                  </a>
-                )}
               </div>
             </div>
 
