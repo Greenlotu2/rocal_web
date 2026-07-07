@@ -1,14 +1,105 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useUser } from '../context/UserContext'; 
+import { supabase } from '../../lib/supabase'; // Ajusta la ruta a tu cliente de Supabase
 export const dynamic = 'force-dynamic';
 
 export default function PerfilUsuarioWeb() {
   const router = useRouter();
-  const { profile, isLoadingUser } = useUser();
+  const { profile, isLoadingUser } = useUser(); 
 
-  // Pantalla de carga mientras trae los datos del usuario logueado
+  const [isEditing, setIsEditing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false); // 🔑 Estado para la eliminación
+  const [formData, setFormData] = useState({
+    full_name: '',
+    telefono: '',
+    edad: '',
+    direccion: ''
+  });
+
+  // Cargar la información del perfil al formulario cuando los datos estén listos
+  useEffect(() => {
+    if (profile) {
+      setFormData({
+        full_name: profile.full_name || '',
+        telefono: profile.telefono || '',
+        edad: profile.edad ? String(profile.edad) : '',
+        direccion: profile.direccion || ''
+      });
+    }
+  }, [profile]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({ ...prev, [name]: value }));
+  };
+
+  const handleSaveChanges = async () => {
+    if (!profile?.id) return;
+    setIsSaving(true);
+
+    try {
+      const { error } = await supabase
+        .from('profiles') 
+        .update({
+          full_name: formData.full_name,
+          telefono: formData.telefono,
+          edad: formData.edad ? parseInt(formData.edad, 10) : null,
+          direccion: formData.direccion
+        })
+        .eq('id', profile.id);
+
+      if (error) throw error;
+
+      router.refresh(); 
+      setIsEditing(false);
+    } catch (err: any) {
+      alert('Error al actualizar el perfil: ' + err.message);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // 🔑 FUNCIÓN MAESTRA DE ELIMINACIÓN REAL
+  const handleEliminarCuenta = async () => {
+    if (!profile?.id) return;
+
+    const primeraConfirmacion = window.confirm(
+      '¿Estás completamente seguro de que deseas eliminar este usuario del sistema? Esta acción borrará permanentemente sus accesos y su expediente corporativo.'
+    );
+
+    if (!primeraConfirmacion) return;
+
+    const segundaConfirmacion = window.confirm(
+      '⚠️ ADVERTENCIA CRÍTICA: Al confirmar este paso, el usuario perderá el acceso inmediato y no se podrá recuperar la información. ¿Continuar?'
+    );
+
+    if (!segundaConfirmacion) return;
+
+    setIsDeleting(true);
+
+    try {
+      // Llamamos a la función RPC que limpia auth.users y profiles simultáneamente
+      const { error } = await supabase.rpc('eliminar_usuario_completo', {
+        p_user_id: profile.id
+      });
+
+      if (error) throw error;
+
+      alert('El usuario ha sido removido exitosamente del sistema.');
+      
+      // Si el usuario se está borrando a sí mismo, cerramos sesión y mandamos a login
+      await supabase.auth.signOut();
+      router.push('/login');
+    } catch (err: any) {
+      alert('Error al eliminar la cuenta: ' + err.message);
+      setIsDeleting(false);
+    }
+  };
+
   if (isLoadingUser) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center">
@@ -28,13 +119,52 @@ export default function PerfilUsuarioWeb() {
         </button>
 
         {/* Encabezado del Perfil */}
-        <header className="mb-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <header className="mb-10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <h1 className="text-3xl font-black text-slate-900">Mi Perfil Profesional</h1>
             <p className="text-slate-500 mt-1">Expediente digital verificado por Constructora ROCAL</p>
           </div>
-          <div className="bg-blue-100 text-blue-800 px-5 py-2 rounded-xl text-sm font-black uppercase tracking-widest border border-blue-200 shadow-sm self-start md:self-auto">
-            {profile?.role || 'Usuario'}
+          <div className="flex items-center gap-3 self-start sm:self-auto">
+            
+            {/* 🛑 BOTÓN DE ELIMINAR CUENTA COMPLETA */}
+            {!isEditing && (
+              <button
+                onClick={handleEliminarCuenta}
+                disabled={isDeleting}
+                className="px-4 py-2 rounded-xl text-sm font-bold bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 disabled:opacity-50 transition-colors cursor-pointer"
+              >
+                {isDeleting ? 'Eliminando...' : '🗑️ Eliminar Cuenta'}
+              </button>
+            )}
+
+            <button
+              onClick={() => {
+                if (isEditing) handleSaveChanges();
+                else setIsEditing(true);
+              }}
+              disabled={isSaving || isDeleting}
+              className={`px-5 py-2 rounded-xl text-sm font-bold shadow-sm transition-colors cursor-pointer ${
+                isEditing 
+                  ? 'bg-blue-600 text-white hover:bg-blue-700' 
+                  : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              {isSaving ? 'Guardando...' : isEditing ? '💾 Guardar Cambios' : '✏️ Editar Perfil'}
+            </button>
+            
+            {isEditing && (
+              <button
+                onClick={() => setIsEditing(false)}
+                disabled={isSaving}
+                className="px-4 py-2 rounded-xl text-sm font-bold bg-slate-200 text-slate-700 hover:bg-slate-300 transition-colors"
+              >
+                Cancelar
+              </button>
+            )}
+            
+            <div className="bg-blue-100 text-blue-800 px-5 py-2 rounded-xl text-sm font-black uppercase tracking-widest border border-blue-200 shadow-sm">
+              {profile?.role || 'Usuario'}
+            </div>
           </div>
         </header>
 
@@ -50,7 +180,7 @@ export default function PerfilUsuarioWeb() {
                   <svg className="w-12 h-12 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
                 )}
               </div>
-              <h2 className="text-xl font-bold text-slate-900">{profile?.full_name || 'Sin nombre'}</h2>
+              <h2 className="text-xl font-bold text-slate-900">{isEditing ? formData.full_name || 'Escribiendo...' : profile?.full_name || 'Sin nombre'}</h2>
               <p className="text-sm font-medium text-slate-500 mt-1">{profile?.carrera_especialidad || 'Especialidad no definida'}</p>
             </div>
 
@@ -71,11 +201,43 @@ export default function PerfilUsuarioWeb() {
                 Información de Contacto y Legal
               </h3>
               
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-8">
-                <Detail label="Correo de Acceso" value={profile?.email || 'No disponible'} />
-                <Detail label="Teléfono / Celular" value={profile?.telefono || 'No registrado'} />
-                <Detail label="Edad Registrada" value={profile?.edad ? `${profile.edad} años` : 'No registrada'} />
-                <Detail label="Dirección Particular" value={profile?.direccion || 'No registrada'} />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                <DetailEditable 
+                  label="Nombre Completo" 
+                  name="full_name"
+                  value={formData.full_name} 
+                  isEditing={isEditing} 
+                  onChange={handleChange} 
+                />
+                <DetailEditable 
+                  label="Teléfono / Celular" 
+                  name="telefono"
+                  value={formData.telefono} 
+                  isEditing={isEditing} 
+                  onChange={handleChange} 
+                />
+                <DetailEditable 
+                  label="Edad Registrada" 
+                  name="edad"
+                  value={formData.edad} 
+                  isEditing={isEditing} 
+                  onChange={handleChange} 
+                  type="number"
+                />
+                <DetailEditable 
+                  label="Dirección Particular" 
+                  name="direccion"
+                  value={formData.direccion} 
+                  isEditing={isEditing} 
+                  onChange={handleChange} 
+                  isFullWidth
+                />
+                <div className="sm:col-span-2">
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 opacity-75">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1">Correo de Acceso (No editable)</p>
+                    <p className="text-slate-800 font-bold text-sm">{profile?.email || 'No disponible'}</p>
+                  </div>
+                </div>
               </div>
 
               <div className="mt-10 pt-8 border-t border-slate-100">
@@ -108,12 +270,34 @@ export default function PerfilUsuarioWeb() {
   );
 }
 
-// Subcomponente para renderizar la información de forma limpia
-function Detail({ label, value }: { label: string; value: string }) {
+interface DetailEditableProps {
+  label: string;
+  name: string;
+  value: string;
+  isEditing: boolean;
+  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  type?: string;
+  isFullWidth?: boolean;
+}
+
+// Subcomponente dinámico
+function DetailEditable({ label, name, value, isEditing, onChange, type = 'text', isFullWidth = false }: DetailEditableProps) {
   return (
-    <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+    <div className={`bg-slate-50 p-4 rounded-xl border border-slate-100 ${isFullWidth ? 'sm:col-span-2' : ''}`}>
       <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1">{label}</p>
-      <p className="text-slate-800 font-bold text-sm">{value}</p>
+      {isEditing ? (
+        <input
+          type={type}
+          name={name}
+          value={value}
+          onChange={onChange}
+          className="w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm font-bold text-slate-800 focus:outline-none focus:border-blue-500 shadow-sm"
+        />
+      ) : (
+        <p className="text-slate-800 font-bold text-sm">
+          {type === 'number' && value ? `${value} años` : value || 'No registrado'}
+        </p>
+      )}
     </div>
   );
 }

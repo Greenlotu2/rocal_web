@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '../../../lib/supabase';
 import { useUser } from '../../context/UserContext';
 
+export const dynamic = 'force-dynamic';
+
 export default function GestionUsuariosWeb() {
   const router = useRouter();
   const { profile, isLoadingUser } = useUser();
@@ -12,6 +14,7 @@ export default function GestionUsuariosWeb() {
   const [usuarios, setUsuarios] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // Campos del formulario
   const [email, setEmail] = useState('');
@@ -23,7 +26,7 @@ export default function GestionUsuariosWeb() {
   const [direccion, setDireccion] = useState('');
   const [telefono, setTelefono] = useState('');
   const [fileIne, setFileIne] = useState<File | null>(null);
-  const [filePerfil, setFilePerfil] = useState<File | null>(null); // 🟢 Estado para foto perfil
+  const [filePerfil, setFilePerfil] = useState<File | null>(null);
 
   useEffect(() => {
     if (!isLoadingUser) {
@@ -49,9 +52,8 @@ export default function GestionUsuariosWeb() {
 
     try {
       let fotoIneUrl = null;
-      let fotoPerfilUrl = null; // 🟢 Nueva variable
+      let fotoPerfilUrl = null;
 
-      // Subir INE
       if (fileIne) {
         const fileExt = fileIne.name.split('.').pop();
         const fileName = `ine_${Date.now()}.${fileExt}`;
@@ -62,7 +64,6 @@ export default function GestionUsuariosWeb() {
         }
       }
 
-      // 🟢 Subir Foto de Perfil
       if (filePerfil) {
         const fileExt = filePerfil.name.split('.').pop();
         const fileName = `perfil_${Date.now()}.${fileExt}`;
@@ -73,7 +74,6 @@ export default function GestionUsuariosWeb() {
         }
       }
 
-      // Llamar al RPC (Asegúrate de haber actualizado el SQL para incluir p_foto_perfil)
       const { error: rpcError } = await supabase.rpc('crear_usuario_desde_admin', {
         p_email: email.trim(),
         p_password: password,
@@ -84,7 +84,7 @@ export default function GestionUsuariosWeb() {
         p_direccion: direccion.trim(),
         p_telefono: telefono.trim(),
         p_foto_ine: fotoIneUrl,
-        p_foto_perfil: fotoPerfilUrl // 🟢 Nuevo parámetro
+        p_foto_perfil: fotoPerfilUrl
       });
 
       if (rpcError) throw rpcError;
@@ -96,6 +96,35 @@ export default function GestionUsuariosWeb() {
       alert('Error al crear usuario: ' + err.message);
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleEliminarUsuario = async (userId: string, targetName: string) => {
+    if (userId === profile?.id) {
+      alert('🔒 No puedes eliminar tu propia cuenta de administrador en sesión.');
+      return;
+    }
+
+    const confirmacion = window.confirm(
+      `¿Estás seguro de que deseas dar de baja permanente a "${targetName}"? Se borrará su cuenta en Authentication y su perfil corporativo.`
+    );
+    if (!confirmacion) return;
+
+    setDeletingId(userId);
+
+    try {
+      const { error } = await supabase.rpc('eliminar_usuario_completo', {
+        p_user_id: userId
+      });
+
+      if (error) throw error;
+
+      alert('Usuario removido con éxito del sistema corporativo.');
+      cargarUsuarios();
+    } catch (err: any) {
+      alert('Error al remover el usuario: ' + err.message);
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -152,31 +181,66 @@ export default function GestionUsuariosWeb() {
             <div className="overflow-x-auto overflow-y-auto max-h-[600px] border border-slate-100 rounded-2xl">
               <table className="w-full text-left text-sm">
                 <thead className="sticky top-0 bg-slate-50 text-slate-500 font-bold border-b border-slate-200">
-                  <tr><th className="px-5 py-4">Avatar</th><th className="px-5 py-4">Personal / Elemento</th><th className="px-5 py-4">Rol Operativo</th><th className="px-5 py-4">Contacto</th><th className="px-5 py-4 text-center">Expediente INE</th></tr>
+                  <tr>
+                    <th className="px-5 py-4">Avatar</th>
+                    <th className="px-5 py-4">Personal / Elemento</th>
+                    <th className="px-5 py-4">Rol Operativo</th>
+                    <th className="px-5 py-4">Contacto</th>
+                    <th className="px-5 py-4 text-center">Acciones</th>
+                  </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {usuarios.map(u => (
                     <tr key={u.id} className="hover:bg-slate-50 transition-colors">
                       <td className="px-5 py-4">
-          {u.foto_perfil_url ? (
-            <img 
-              src={u.foto_perfil_url} 
-              alt={u.full_name} 
-              className="w-10 h-10 rounded-full object-cover border border-slate-200 shadow-sm"
-            />
-          ) : (
-            <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center border border-slate-200 text-slate-400 font-bold text-[10px]">
-              {u.full_name?.charAt(0).toUpperCase()}
-            </div>
-          )}
-        </td>
+                        {u.foto_perfil_url ? (
+                          <img 
+                            src={u.foto_perfil_url} 
+                            alt={u.full_name} 
+                            className="w-10 h-10 rounded-full object-cover border border-slate-200 shadow-sm"
+                          />
+                        ) : (
+                          <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center border border-slate-200 text-slate-400 font-bold text-[10px]">
+                            {u.full_name?.charAt(0).toUpperCase()}
+                          </div>
+                        )}
+                      </td>
                       <td className="px-5 py-4">
                         <p className="font-bold text-slate-900">{u.full_name}</p>
                         <p className="text-[11px] text-slate-500">{u.carrera_especialidad || 'Especialidad N/A'}</p>
                       </td>
-                      <td className="px-5 py-4"><span className={`px-3 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider border ${u.role === 'admin' ? 'bg-purple-50 text-purple-700 border-purple-100' : u.role === 'oficina' ? 'bg-amber-50 text-amber-700 border-amber-100' : 'bg-blue-50 text-blue-700 border-blue-100'}`}>{u.role}</span></td>
+                      <td className="px-5 py-4">
+                        <span className={`px-3 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider border ${
+                          u.role === 'admin' 
+                            ? 'bg-purple-50 text-purple-700 border-purple-100' 
+                            : u.role === 'oficina' 
+                            ? 'bg-amber-50 text-amber-700 border-amber-100' 
+                            : 'bg-blue-50 text-blue-700 border-blue-100'
+                        }`}>
+                          {u.role}
+                        </span>
+                      </td>
                       <td className="px-5 py-4 text-slate-600 font-medium">{u.telefono || <span className="text-slate-400 italic">No registrado</span>}</td>
-                      <td className="px-5 py-4 text-center">{u.foto_ine_url ? <a href={u.foto_ine_url} target="_blank" rel="noreferrer" className="inline-block bg-slate-100 text-slate-700 text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-slate-200 transition-colors">Ver Imagen</a> : <span className="text-slate-300 text-xs italic">Sin Archivo</span>}</td>
+                      
+                      {/* 🔑 CORREGIDO: Envoltura div limpia sin saltos de línea ni comentarios jsx que provoquen fallos de nodos en el DOM */}
+                      <td className="px-5 py-4 text-center">
+                        <div className="flex items-center justify-center gap-2">
+                          {u.foto_ine_url ? (
+                            <a href={u.foto_ine_url} target="_blank" rel="noreferrer" className="bg-slate-100 text-slate-700 text-xs font-bold px-2.5 py-1.5 rounded-lg hover:bg-slate-200 transition-colors">
+                              INE 📁
+                            </a>
+                          ) : (
+                            <span className="text-slate-300 text-xs italic bg-slate-50 px-2 py-1.5 rounded-lg border border-dashed">Sin INE</span>
+                          )}
+                          <button
+                            onClick={() => handleEliminarUsuario(u.id, u.full_name)}
+                            disabled={deletingId === u.id || u.id === profile?.id}
+                            className="bg-red-50 text-red-600 hover:bg-red-100 disabled:opacity-40 text-xs font-bold px-2.5 py-1.5 rounded-lg border border-red-100 transition-colors cursor-pointer"
+                          >
+                            {deletingId === u.id ? 'Borrando...' : 'Baja 🗑️'}
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
