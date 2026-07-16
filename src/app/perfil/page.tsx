@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useUser } from '../context/UserContext'; 
 import { supabase } from '../../lib/supabase'; // Ajusta la ruta a tu cliente de Supabase
@@ -9,10 +9,13 @@ export const dynamic = 'force-dynamic';
 export default function PerfilUsuarioWeb() {
   const router = useRouter();
   const { profile, isLoadingUser } = useUser(); 
+  const fileInputRef = useRef<HTMLInputElement>(null); // 🟢 Referencia para abrir el selector de archivos
 
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false); // 🔑 Estado para la eliminación
+  const [isDeleting, setIsDeleting] = useState(false); 
+  const [isUploading, setIsUploading] = useState(false); // 🟢 Estado de carga de la foto
+  const [imageUrl, setImageUrl] = useState<string | null>(null); 
   const [formData, setFormData] = useState({
     full_name: '',
     telefono: '',
@@ -20,7 +23,7 @@ export default function PerfilUsuarioWeb() {
     direccion: ''
   });
 
-  // Cargar la información del perfil al formulario cuando los datos estén listos
+  // Cargar la información del perfil y resolver la foto de perfil desde el bucket
   useEffect(() => {
     if (profile) {
       setFormData({
@@ -29,12 +32,83 @@ export default function PerfilUsuarioWeb() {
         edad: profile.edad ? String(profile.edad) : '',
         direccion: profile.direccion || ''
       });
+
+      // Obtener la URL de la foto de perfil desde el bucket
+      const campoFoto = (profile as any).avatar_url || (profile as any).foto_perfil_url;
+
+      if (campoFoto) {
+        if (campoFoto.startsWith('http')) {
+          setImageUrl(campoFoto);
+        } else {
+          const { data } = supabase.storage
+            .from('avatars') // ⚠️ Ajusta al nombre exacto de tu bucket si es diferente
+            .getPublicUrl(campoFoto);
+          
+          if (data?.publicUrl) {
+            setImageUrl(data.publicUrl);
+          }
+        }
+      }
     }
   }, [profile]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
+  };
+
+  // 🟢 FUNCIÓN PARA CARGAR Y CAMBIAR LA FOTO DE PERFIL EN EL BUCKET
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !profile?.id) return;
+
+    setIsUploading(true);
+    try {
+      const fileExt = file.name.split('.').pop();
+      // Creamos un path único usando el ID del usuario y un timestamp para evitar problemas de caché
+      const filePath = `${profile.id}/${Date.now()}.${fileExt}`;
+
+      // 1. Subir el archivo físico al storage de Supabase
+      const { error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(filePath, file, { cacheControl: '3600', upsert: true });
+
+      if (uploadError) throw uploadError;
+
+      // 2. Obtener la nueva URL pública
+      const { data: urlData } = supabase.storage
+        .from('avatars')
+        .getPublicUrl(filePath);
+
+      const nuevaUrl = urlData?.publicUrl;
+      if (!nuevaUrl) throw new Error('No se pudo generar la URL pública del archivo.');
+
+      // 3. Determinar qué columna usa tu base de datos y actualizar el registro en la tabla profiles
+      const columnasActualizar: any = {};
+      if ('avatar_url' in profile) columnasActualizar.avatar_url = filePath;
+      if ('foto_perfil_url' in profile) columnasActualizar.foto_perfil_url = filePath;
+      
+      // Por seguridad si no detecta ninguna en el tipo, intentamos actualizar ambas por si acaso
+      if (Object.keys(columnasActualizar).length === 0) {
+        columnasActualizar.avatar_url = filePath;
+      }
+
+      const { error: dbError } = await supabase
+        .from('profiles')
+        .update(columnasActualizar)
+        .eq('id', profile.id);
+
+      if (dbError) throw dbError;
+
+      // 4. Actualizar el estado visual del componente y refrescar la sesión
+      setImageUrl(nuevaUrl);
+      alert('¡Fotografía de perfil actualizada con éxito!');
+      router.refresh();
+    } catch (err: any) {
+      alert('Error al subir la imagen: ' + err.message);
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   const handleSaveChanges = async () => {
@@ -63,7 +137,7 @@ export default function PerfilUsuarioWeb() {
     }
   };
 
-  // 🔑 FUNCIÓN MAESTRA DE ELIMINACIÓN REAL
+  // FUNCIÓN MAESTRA DE ELIMINACIÓN
   const handleEliminarCuenta = async () => {
     if (!profile?.id) return;
 
@@ -82,7 +156,6 @@ export default function PerfilUsuarioWeb() {
     setIsDeleting(true);
 
     try {
-      // Llamamos a la función RPC que limpia auth.users y profiles simultáneamente
       const { error } = await supabase.rpc('eliminar_usuario_completo', {
         p_user_id: profile.id
       });
@@ -90,8 +163,6 @@ export default function PerfilUsuarioWeb() {
       if (error) throw error;
 
       alert('El usuario ha sido removido exitosamente del sistema.');
-      
-      // Si el usuario se está borrando a sí mismo, cerramos sesión y mandamos a login
       await supabase.auth.signOut();
       router.push('/login');
     } catch (err: any) {
@@ -126,7 +197,7 @@ export default function PerfilUsuarioWeb() {
           </div>
           <div className="flex items-center gap-3 self-start sm:self-auto">
             
-            {/* 🛑 BOTÓN DE ELIMINAR CUENTA COMPLETA */}
+            {/* BOTÓN DE ELIMINAR CUENTA COMPLETA */}
             {!isEditing && (
               <button
                 onClick={handleEliminarCuenta}
@@ -142,7 +213,7 @@ export default function PerfilUsuarioWeb() {
                 if (isEditing) handleSaveChanges();
                 else setIsEditing(true);
               }}
-              disabled={isSaving || isDeleting}
+              disabled={isSaving || isDeleting || isUploading}
               className={`px-5 py-2 rounded-xl text-sm font-bold shadow-sm transition-colors cursor-pointer ${
                 isEditing 
                   ? 'bg-blue-600 text-white hover:bg-blue-700' 
@@ -170,16 +241,45 @@ export default function PerfilUsuarioWeb() {
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
           
-          {/* Columna Izquierda: Foto e Info Básica */}
+          {/* Columna Izquierda: Foto de perfil desde el Bucket con función de Edición */}
           <div className="space-y-6">
             <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm text-center">
-              <div className="w-32 h-32 bg-slate-100 rounded-full mx-auto mb-5 overflow-hidden border-4 border-white shadow-md flex items-center justify-center">
-                {profile?.foto_ine_url ? (
-                  <img src={profile.foto_ine_url} className="w-full h-full object-cover" alt="Foto de Perfil" />
+              
+              {/* Contenedor del Avatar con Input oculto y hover interactivo */}
+              <div className="relative w-32 h-32 mx-auto mb-5 group rounded-full overflow-hidden border-4 border-white shadow-md bg-slate-100 flex items-center justify-center">
+                {imageUrl ? (
+                  <img src={imageUrl} className="w-full h-full object-cover" alt="Foto de Perfil" />
                 ) : (
                   <svg className="w-12 h-12 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
                 )}
+
+                {/* 🟢 Capa sobrepuesta para cambiar foto al hacer Hover */}
+                <button
+                  type="button"
+                  disabled={isUploading}
+                  onClick={() => fileInputRef.current?.click()}
+                  className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center text-white text-[10px] font-bold transition-opacity cursor-pointer duration-200 disabled:opacity-50"
+                >
+                  {isUploading ? (
+                    <span className="animate-pulse">Subiendo...</span>
+                  ) : (
+                    <>
+                      <span>📷</span>
+                      <span className="mt-1">Cambiar Foto</span>
+                    </>
+                  )}
+                </button>
+
+                {/* Input HTML oculto controlado por la referencia */}
+                <input 
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleFileChange}
+                  accept="image/*"
+                  className="hidden"
+                />
               </div>
+
               <h2 className="text-xl font-bold text-slate-900">{isEditing ? formData.full_name || 'Escribiendo...' : profile?.full_name || 'Sin nombre'}</h2>
               <p className="text-sm font-medium text-slate-500 mt-1">{profile?.carrera_especialidad || 'Especialidad no definida'}</p>
             </div>
@@ -241,26 +341,11 @@ export default function PerfilUsuarioWeb() {
               </div>
 
               <div className="mt-10 pt-8 border-t border-slate-100">
-                <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-6 flex items-center gap-2">
-                  <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-                  Identificación Oficial (INE)
-                </h3>
-                {profile?.foto_ine_url ? (
-                  <div className="relative group overflow-hidden rounded-2xl border border-slate-200 shadow-sm bg-slate-50">
-                    <img 
-                      src={profile.foto_ine_url} 
-                      className="w-full h-auto object-contain max-h-[400px] transition-transform duration-300 group-hover:scale-[1.02]" 
-                      alt="Identificación Oficial" 
-                    />
-                  </div>
-                ) : (
-                  <div className="bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl p-12 flex flex-col items-center justify-center text-slate-400">
-                    <svg className="w-12 h-12 mb-3 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-                    <span className="font-medium text-sm">Archivo INE no adjuntado a este perfil.</span>
-                    <span className="text-xs mt-1 text-slate-400">Contacta a Recursos Humanos si necesitas actualizarlo.</span>
-                  </div>
-                )}
+                <p className="text-xs text-slate-400 italic">
+                  * Al actualizar tu fotografía desde el panel web, los cambios se verán reflejados inmediatamente en tu expediente digital sincronizado con el APK móvil de los residentes en campo.
+                </p>
               </div>
+
             </div>
           </div>
 
@@ -280,7 +365,6 @@ interface DetailEditableProps {
   isFullWidth?: boolean;
 }
 
-// Subcomponente dinámico
 function DetailEditable({ label, name, value, isEditing, onChange, type = 'text', isFullWidth = false }: DetailEditableProps) {
   return (
     <div className={`bg-slate-50 p-4 rounded-xl border border-slate-100 ${isFullWidth ? 'sm:col-span-2' : ''}`}>
