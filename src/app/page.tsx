@@ -454,19 +454,20 @@ export default function DashboardPage() {
     } catch (error: any) { setWorkerFormError(error.message); } finally { setLoadingWorkerForm(false); }
   };
 
-  // 🟢 FUNCIÓN ACTUALIZADA: CREACIÓN DE OBRA CON TODOS LOS CAMPOS NUEVOS
-  const handleCreateProject = async (e: React.FormEvent) => {
+ const handleCreateProject = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoadingProjectForm(true); setProjectFormError(null);
+    setLoadingProjectForm(true); 
+    setProjectFormError(null);
     try {
+      // 🟢 Mandamos todos los datos estructurados a Supabase
       const { data, error } = await supabase.from('projects').insert([
         { 
           name: newProjectName, 
           client_name: newProjectCliente, 
           contract_number: newProjectNumContrato,
+          ubicacion: newProjectUbicacion, // ⚠️ Columna en tu base de datos
           start_date: newProjectFechaInicio || null, 
-          end_date: newProjectFechaFin || null, 
-          ubicacion: newProjectUbicacion // ⚠️ Verificar si este es el nombre de tu columna en Supabase
+          end_date: newProjectFechaFin || null
         } as any
       ]).select();
 
@@ -475,14 +476,14 @@ export default function DashboardPage() {
       if (data && data.length > 0) {
         const createdProject = data[0];
         
-        // 🟢 Asignación inmediata del residente miembro
+        // 🟢 Vinculamos al residente para que el APK tenga permisos inmediatos
         if (selectedResidentId) {
           await supabase.from('project_members').insert([
             { project_id: createdProject.id, user_id: selectedResidentId, role: 'residente' }
           ]);
         }
 
-        // Limpiar campos
+        // Limpiamos todos los estados
         setNewProjectName(''); 
         setNewProjectCliente(''); 
         setNewProjectNumContrato('');
@@ -494,6 +495,7 @@ export default function DashboardPage() {
 
         setProjects(prev => [createdProject, ...prev]); 
         setSelectedProject(createdProject);
+        alert('¡Obra creada y asignada con éxito!');
       }
     } catch (error: any) { 
       setProjectFormError(error.message); 
@@ -1614,13 +1616,13 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* 🟢 MODAL DE PROYECTOS ACTUALIZADO CON FORMULARIO COMPLETO */}
+{/* 🟢 MODAL DE PROYECTOS ACTUALIZADO CON FORMULARIO COMPLETO */}
       {isProjectModalOpen && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-3xl w-full max-w-md p-6 shadow-2xl border border-slate-100 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-lg font-black text-slate-800">Alta de Nueva Obra</h3>
-              <button onClick={() => setIsProjectModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 bg-slate-50 rounded-lg border">
+              <button type="button" onClick={() => setIsProjectModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 bg-slate-50 rounded-lg border">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
                 </svg>
