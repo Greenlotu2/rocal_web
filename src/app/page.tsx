@@ -9,7 +9,6 @@ import jsPDF from 'jspdf';
 export const dynamic = 'force-dynamic';
 import autoTable from 'jspdf-autotable';
 
-// Icono Feather simplificado para no meter dependencias extras en Next.js
 const SearchIcon = () => (
   <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
 );
@@ -21,7 +20,7 @@ interface HerramientaAlmacen {
   marca_modelo: string;
   ubicacion: 'bodega' | 'obra';
   asignado_a?: string | null;
-  notas?: string | null;
+  notes?: string | null;
   token_firma?: string | null;
   fecha_firma?: string | null;
   ine_url?: string | null;
@@ -29,12 +28,6 @@ interface HerramientaAlmacen {
   firma_recibe_url?: string | null;
   fecha_entrega?: string | null;
   fecha_devolucion?: string | null;
-}
-
-interface ItemAdicional {
-  id: string;
-  nombre: string;
-  marca: string;
 }
 
 export default function DashboardPage() {
@@ -50,6 +43,7 @@ export default function DashboardPage() {
   const [numCotizacion, setNumCotizacion] = useState('');
   const [encargadoRecibeDestajo, setEncargadoRecibeDestajo] = useState('');
   const [solicitadoPorDestajo, setSolicitadoPorDestajo] = useState('');
+  const [subTipoCajaChica, setSubTipoCajaChica] = useState<'Inversion' | 'Gasto'>('Gasto');
   
   const router = useRouter();
   const [loadingAuth, setLoadingAuth] = useState(true);
@@ -104,12 +98,14 @@ export default function DashboardPage() {
   const [loadingExpenseForm, setLoadingExpenseForm] = useState(false);
   const [expenseFormError, setExpenseFormError] = useState<string | null>(null);
 
+  // --- ESTADOS PARA CREACIÓN DE OBRA COMPLETA ---
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectCliente, setNewProjectCliente] = useState('');
+  const [newProjectNumContrato, setNewProjectNumContrato] = useState('');
+  const [newProjectUbicacion, setNewProjectUbicacion] = useState(''); // 🟢 Nuevo campo
   const [newProjectFechaInicio, setNewProjectFechaInicio] = useState('');
   const [newProjectFechaFin, setNewProjectFechaFin] = useState('');
-  const [newProjectNumContrato, setNewProjectNumContrato] = useState('');
   const [selectedResidentId, setSelectedResidentId] = useState('');
   const [loadingProjectForm, setLoadingProjectForm] = useState(false);
   const [projectFormError, setProjectFormError] = useState<string | null>(null);
@@ -123,7 +119,6 @@ export default function DashboardPage() {
     name: '', client_name: '', contract_number: '', start_date: '', end_date: ''
   });
 
-  // --- ESTADOS DE CONTROL DE ALMACÉN ---
   const [herramientas, setHerramientas] = useState<HerramientaAlmacen[]>([]);
   const [searchResguardo, setSearchResguardo] = useState('');
   const [filtroUbicacionResguardo, setFiltroUbicacionResguardo] = useState<'todos' | 'bodega' | 'obra'>('todos');
@@ -153,7 +148,7 @@ export default function DashboardPage() {
     }
 
     if (!attArray || attArray.length === 0) {
-      return <span className="text-[10px] text-slate-400 italic">No registrada</span>;
+      return <span className="text-[10px] text-slate-500 font-medium bg-slate-100/80 px-2 py-0.5 rounded italic">No registrada</span>;
     }
 
     const days = ['L', 'M', 'M', 'J', 'V', 'S'];
@@ -264,11 +259,13 @@ export default function DashboardPage() {
 
     if (cajaChicaRecords) cajaChicaRecords.forEach(record => { totals['Caja Chica'] += Number(record.monto) || 0; });
     if (payrollRecords) payrollRecords.forEach(record => { totals['Mano de Obra'] += Number(record.final_salary || 0); });
-    if (inventoryRecords) inventoryRecords.forEach(record => {
-        const cantidad = Number(record.cantidad || record.quantity || record.stock || 1);
+    if (inventoryRecords) {
+      inventoryRecords.forEach(record => {
+        const cantidad = Number(record.quantity || 1);
         const precioUnitario = Number(record.unit_price || 0);
         totals['Destajos y Materiales'] += (cantidad * precioUnitario);
-    });
+      });
+    }
 
     return Object.entries(totals).map(([name, value]) => ({ name, value: Number(value) })).sort((a, b) => b.value - a.value);
   }, [gastosGeneralesRecords, cajaChicaRecords, payrollRecords, inventoryRecords]);
@@ -309,7 +306,7 @@ export default function DashboardPage() {
     gastosGeneralesRecords.forEach(r => processRecord(r, 'fecha', Number(r.monto || 0), 'gastos'));
     cajaChicaRecords.forEach(r => processRecord(r, 'fecha', Number(r.monto || 0), 'caja'));
     payrollRecords.forEach(r => processRecord(r, 'week_start', Number(r.final_salary || 0), 'nomina'));
-    inventoryRecords.forEach(r => processRecord(r, 'created_at', Number(r.cantidad || r.quantity || 1) * Number(r.unit_price || 0), 'destajos'));
+    inventoryRecords.forEach(r => processRecord(r, 'created_at', Number(r.quantity || 1) * Number(r.unit_price || 0), 'destajos'));
 
     return Object.entries(weeks)
       .sort(([keyA], [keyB]) => new Date(keyB).getTime() - new Date(keyA).getTime())
@@ -417,12 +414,12 @@ export default function DashboardPage() {
         case 'destajos':
           const resInv = await supabase.from('inventory').insert([{
             project_id: selectedProject.id,
-            item_name: conceptoGasto, 
-            unidad: unidadGasto || null,
-            cantidad: cantidadGasto ? parseFloat(cantidadGasto) : 1,
-            unit_price: precioUnitarioGasto ? parseFloat(precioUnitarioGasto) : 0,
-            encargado_recibe: encargadoRecibeDestajo || null, 
-            solicitado_por: solicitadoPorDestajo || null,      
+            name: conceptoGasto, 
+            unit: unidadGasto || null, 
+            quantity: cantidadGasto ? parseFloat(cantidadGasto) : 1, 
+            unit_price: precioUnitarioGasto ? parseFloat(precioUnitarioGasto) : 0, 
+            in_charge: encargadoRecibeDestajo || null, 
+            requested_by: solicitadoPorDestajo || null,       
             created_at: new Date().toISOString()
           }]);
           error = resInv.error;
@@ -457,19 +454,52 @@ export default function DashboardPage() {
     } catch (error: any) { setWorkerFormError(error.message); } finally { setLoadingWorkerForm(false); }
   };
 
+  // 🟢 FUNCIÓN ACTUALIZADA: CREACIÓN DE OBRA CON TODOS LOS CAMPOS NUEVOS
   const handleCreateProject = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoadingProjectForm(true); setProjectFormError(null);
     try {
-      const { data, error } = await supabase.from('projects').insert([{ name: newProjectName, client_name: newProjectCliente, start_date: newProjectFechaInicio || null, end_date: newProjectFechaFin || null, contract_number: newProjectNumContrato }]).select();
+      const { data, error } = await supabase.from('projects').insert([
+        { 
+          name: newProjectName, 
+          client_name: newProjectCliente, 
+          contract_number: newProjectNumContrato,
+          start_date: newProjectFechaInicio || null, 
+          end_date: newProjectFechaFin || null, 
+          ubicacion: newProjectUbicacion // ⚠️ Verificar si este es el nombre de tu columna en Supabase
+        } as any
+      ]).select();
+
       if (error) throw error;
+      
       if (data && data.length > 0) {
         const createdProject = data[0];
-        if (selectedResidentId) await supabase.from('project_members').insert([{ project_id: createdProject.id, user_id: selectedResidentId, role: 'residente' }]);
-        setNewProjectName(''); setNewProjectCliente(''); setNewProjectFechaInicio(''); setNewProjectFechaFin(''); setNewProjectNumContrato(''); setSelectedResidentId(''); setIsProjectModalOpen(false);
-        setProjects(prev => [createdProject, ...prev]); setSelectedProject(createdProject);
+        
+        // 🟢 Asignación inmediata del residente miembro
+        if (selectedResidentId) {
+          await supabase.from('project_members').insert([
+            { project_id: createdProject.id, user_id: selectedResidentId, role: 'residente' }
+          ]);
+        }
+
+        // Limpiar campos
+        setNewProjectName(''); 
+        setNewProjectCliente(''); 
+        setNewProjectNumContrato('');
+        setNewProjectUbicacion('');
+        setNewProjectFechaInicio(''); 
+        setNewProjectFechaFin(''); 
+        setSelectedResidentId(''); 
+        setIsProjectModalOpen(false);
+
+        setProjects(prev => [createdProject, ...prev]); 
+        setSelectedProject(createdProject);
       }
-    } catch (error: any) { setProjectFormError(error.message); } finally { setLoadingProjectForm(false); }
+    } catch (error: any) { 
+      setProjectFormError(error.message); 
+    } finally { 
+      setLoadingProjectForm(false); 
+    }
   };
 
   const handleUploadPlano = async (e: React.FormEvent) => {
@@ -721,7 +751,6 @@ export default function DashboardPage() {
     }
   };
 
-  // 🟢 FUNCIÓN EXCLUSIVA PARA GENERAR E IMPRIMIR LA RESPONSIVA LEGAL DESDE LA PLATAFORMA WEB
   const ejecutarExportacionPDFWeb = (tool: HerramientaAlmacen) => {
     const fechaPrestamo = new Date(tool.fecha_entrega || new Date()).toLocaleDateString('es-MX', { 
       weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' 
@@ -765,7 +794,7 @@ export default function DashboardPage() {
           En referencia al proyecto <strong>"${selectedProject?.name || 'PROYECTO DE CONSTRUCCIÓN'}"</strong>, se establece que el responsable de la custodia y ejecución de los trabajos será el <strong>${tool.asignado_a || 'RESPONSABLE NO ASIGNADO'}</strong>, el cual en mutuo acuerdo con el representante de la empresa acuerda recibir en <strong>DEBIDAS Y ÓPTIMAS CONDICIONES EL SIGUIENTE EQUIPO</strong> para la realización de sus labores:
         </div>
 
-        <div class="equipos-box">- 1 Unidad de ${tool.nombre}\n- Marca/Modelo: ${tool.marca_modelo}\n- Notas: ${tool.notas || 'ÓPTIMAS CONDICIONES DE OPERACIÓN'}</div>
+        <div class="equipos-box">- 1 Unidad de ${tool.nombre}\n- Marca/Modelo: ${tool.marca_modelo}\n- Notas: ${tool.notes || 'ÓPTIMAS CONDICIONES DE OPERACIÓN'}</div>
 
         <div class="content">
           El receptor asume la <strong>RESPONSABILIDAD Y EL CUIDADO DE DICHO EQUIPO / HERRAMIENTA</strong> y se compromete a utilizarlo con un uso estrictamente laboral. Cualquier problema o fallo deberá ser informado de inmediato para su renovación o mantenimiento. En caso de que el equipo sea extraviado o dañado por mal uso, este tendrá que reponerse por el encargado, aceptando que se recibe listo para usarse.
@@ -1019,7 +1048,7 @@ export default function DashboardPage() {
                       <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
                         <table className="w-full text-left text-sm">
                           <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
-                            <tr><th>Semana Laboral</th><th className="text-right">Mano de Obra</th><th className="text-right">Destajos / Mat.</th><th className="text-right">Caja Chica</th><th className="text-right">Salida Total</th></tr>
+                            <tr><th className="px-6 py-4">Semana Laboral</th><th className="text-right px-6 py-4">Mano de Obra</th><th className="text-right px-6 py-4">Destajos / Mat.</th><th className="text-right px-6 py-4">Caja Chica</th><th className="text-right px-6 py-4">Salida Total</th></tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100 bg-white">
                             {weeklySummaryData.map((week, idx) => (
@@ -1059,7 +1088,7 @@ export default function DashboardPage() {
                           <tbody className="divide-y divide-slate-100 bg-white">
                             {gastosGeneralesRecords.map(r => (
                               <tr key={r.id}>
-                                <td className="px-6 py-4 text-slate-600">{formatDate(r.fecha)}</td>
+                                <td className="px-6 py-4 text-slate-600">{formatDate(r.fecha).split(',')[0]}</td>
                                 <td className="px-6 py-4 text-slate-900 font-medium">{r.concepto}</td>
                                 <td className="px-6 py-4 text-slate-700">{r.proveedor || 'S/P'}</td>
                                 <td className="px-6 py-4 text-red-600 font-bold text-right">-{formatCurrency(r.monto)}</td>
@@ -1077,9 +1106,9 @@ export default function DashboardPage() {
                           <tbody className="divide-y divide-slate-100 bg-white">
                             {cajaChicaRecords.map(r => (
                               <tr key={r.id}>
-                                <td className="px-6 py-4 text-slate-600">{formatDate(r.fecha)}</td>
+                                <td className="px-6 py-4 text-slate-600">{formatDate(r.fecha).split(',')[0]}</td>
                                 <td className="px-6 py-4 font-medium text-slate-900">{r.encargado}</td>
-                                <td className="px-6 py-4 text-slate-600">{r.concepto || 'Gastos menores'}</td>
+                                <td className="px-6 py-4 text-slate-700">{r.concepto || 'Gastos menores'}</td>
                                 <td className="px-6 py-4 text-red-600 font-bold text-right">-{formatCurrency(r.monto)}</td>
                               </tr>
                             ))}
@@ -1095,7 +1124,7 @@ export default function DashboardPage() {
                           <tbody className="divide-y divide-slate-100 bg-white">
                             {maquinariaRecords.map(r => (
                               <tr key={r.id}>
-                                <td className="px-6 py-4 text-slate-600">{formatDate(r.fecha)}</td>
+                                <td className="px-6 py-4 text-slate-600">{formatDate(r.fecha).split(',')[0]}</td>
                                 <td className="px-6 py-4 text-slate-900 font-medium">{r.equipo} {r.asistencia_dias && `(${r.asistencia_dias} hrs)`}</td>
                                 <td className="px-6 py-4 text-slate-700">{r.proveedor || 'S/P'}</td>
                                 <td className="px-6 py-4 text-red-600 font-bold text-right">-{formatCurrency(r.monto)}</td>
@@ -1108,21 +1137,36 @@ export default function DashboardPage() {
                       {expenseSubTab === 'destajos' && (
                         <table className="w-full text-left text-sm">
                           <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
-                            <tr><th className="px-6 py-4">Fecha</th><th className="px-6 py-4">Concepto / Material</th><th className="px-6 py-4">Encargado / Recibe</th><th className="px-6 py-4">Solicitado Por</th><th className="px-6 py-4 text-right">Cantidad</th><th className="px-6 py-4 text-right">Total</th></tr>
+                            <tr>
+                              <th className="px-6 py-4">Fecha</th>
+                              <th className="px-6 py-4">Concepto / Actividad</th>
+                              <th className="px-6 py-4">Encargado / Recibe</th>
+                              <th className="px-6 py-4">Solicitado Por</th>
+                              <th className="px-6 py-4 text-right">Cantidad</th>
+                              <th className="px-6 py-4 text-right">Total</th>
+                            </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100 bg-white">
                             {inventoryRecords.map((r, idx) => (
                               <tr key={r.id || idx} className="hover:bg-slate-50/80">
                                 <td className="px-6 py-4 text-slate-600">{formatDate(r.created_at || r.fecha).split(',')[0]}</td>
-                                <td className="px-6 py-4 text-slate-900 font-medium">{r.item_name || 'Sin nombre'}</td>
+                                <td className="px-6 py-4 text-slate-900 font-medium">{r.name || 'Sin nombre'}</td>
                                 <td className="px-6 py-4">
-                                  {r.encargado_recibe ? <span className="bg-slate-100 px-2 py-1 rounded text-xs font-semibold">👤 {r.encargado_recibe}</span> : <span className="text-slate-400 italic text-xs">No asignado</span>}
+                                  {r.in_charge ? (
+                                    <span className="bg-slate-100 px-2 py-1 rounded text-xs font-semibold text-slate-700">👤 {r.in_charge}</span>
+                                  ) : (
+                                    <span className="text-slate-700 font-medium bg-slate-100/70 px-2 py-0.5 rounded italic text-xs">No asignado</span>
+                                  )}
                                 </td>
                                 <td className="px-6 py-4">
-                                  {r.solicitado_por ? <span className="bg-blue-50 border border-blue-100 px-2 py-1 rounded text-xs font-semibold text-blue-700">✏️ {r.solicitado_por}</span> : <span className="text-slate-400 italic text-xs">No especificado</span>}
+                                  {r.requested_by ? (
+                                    <span className="bg-blue-50 border border-blue-100 px-2 py-1 rounded text-xs font-semibold text-blue-700">✏️ {r.requested_by}</span>
+                                  ) : (
+                                    <span className="text-slate-700 font-medium bg-slate-100/70 px-2 py-0.5 rounded italic text-xs">No especificado</span>
+                                  )}
                                 </td>
-                                <td className="px-6 py-4 text-right">{r.cantidad} {r.unidad || ''}</td>
-                                <td className="px-6 py-4 font-bold text-red-600 text-right">-{formatCurrency(Number(r.cantidad || 0) * Number(r.unit_price || 0))}</td>
+                                <td className="px-6 py-4 text-right">{r.quantity} {r.unit || ''}</td>
+                                <td className="px-6 py-4 font-bold text-red-600 text-right">-{formatCurrency(Number(r.quantity || 0) * Number(r.unit_price || 0))}</td>
                               </tr>
                             ))}
                           </tbody>
@@ -1157,7 +1201,7 @@ export default function DashboardPage() {
 
                             <div className="p-6 space-y-4">
                               {registrosAgrupadosPorSemana.length === 0 ? (
-                                <div className="text-center py-12 text-slate-400 italic text-sm font-medium bg-slate-50 rounded-xl border border-dashed border-slate-200">No hay reportes de nómina o asistencia registrados para esta obra.</div>
+                                <div className="text-center py-12 text-slate-700 italic text-sm font-medium bg-slate-50 rounded-xl border border-dashed border-slate-200">No hay reportes de nómina o asistencia registrados para esta obra.</div>
                               ) : (
                                 registrosAgrupadosPorSemana.map((bloque, idx) => (
                                   <details key={idx} className="group border border-slate-200 rounded-xl bg-white shadow-sm open:shadow-md transition-all duration-200">
@@ -1168,7 +1212,7 @@ export default function DashboardPage() {
                                         <span className="font-bold text-slate-900">{bloque.numeroSemana}</span>
                                       </div>
                                       <div className="flex items-center gap-4">
-                                        <span className="text-xs bg-slate-100 text-slate-600 font-bold px-2.5 py-1 rounded-md">{bloque.registros.length} trabajadores</span>
+                                        <span className="text-xs bg-slate-100 text-slate-700 font-bold px-2.5 py-1 rounded-md">{bloque.registros.length} trabajadores</span>
                                         <span className="text-sm font-mono font-black text-red-600">-{formatCurrency(bloque.subtotalSemana)}</span>
                                       </div>
                                     </summary>
@@ -1186,12 +1230,12 @@ export default function DashboardPage() {
                                             
                                             return (
                                               <tr key={rIdx} className="hover:bg-slate-50/50">
-                                                <td className="px-4 py-3 align-middle"><span className="font-bold text-slate-900 block">{nombreTrabajador}</span><span className="text-slate-400 text-[10px] block mt-0.5 uppercase font-medium">{rolTrabajador}</span></td>
+                                                <td className="px-4 py-3 align-middle"><span className="font-bold text-slate-900 block">{nombreTrabajador}</span><span className="text-slate-500 text-[10px] block mt-0.5 uppercase font-medium">{rolTrabajador}</span></td>
                                                 <td className="px-4 py-3 text-center align-middle flex justify-center">{renderAttendanceDots(p.attendance)}</td>
-                                                <td className="px-4 py-3 align-middle text-slate-600 max-w-[200px] truncate">
-                                                  {p.deduction_reason || p.reason ? <span className="text-red-600 bg-red-50 px-2 py-0.5 rounded border border-red-100 font-medium text-[10px]">⚠ {p.deduction_reason || p.reason}</span> : <span className="text-slate-400 italic text-[11px]">Ninguna</span>}
+                                                <td className="px-4 py-3 align-middle text-slate-700 max-w-[200px] truncate">
+                                                  {p.deduction_reason || p.reason ? <span className="text-red-600 bg-red-50 px-2 py-0.5 rounded border border-red-100 font-medium text-[10px]">⚠ {p.deduction_reason || p.reason}</span> : <span className="text-slate-700 bg-slate-100/70 px-2 py-0.5 rounded border border-slate-200 italic text-[11px]">Ninguna</span>}
                                                 </td>
-                                                <td className="px-4 py-3 text-right align-middle font-bold text-slate-800 font-mono">{formatCurrency(p.final_salary || 0)}</td>
+                                                <td className="px-4 py-3 text-right align-middle font-bold text-slate-900 font-mono">{formatCurrency(p.final_salary || 0)}</td>
                                               </tr>
                                             );
                                           })}
@@ -1214,7 +1258,7 @@ export default function DashboardPage() {
                           <div className="divide-y divide-slate-100 overflow-y-auto max-h-[500px]">
                             {workersRecords.map((w) => (
                               <div key={w.id} className="p-4 hover:bg-slate-50 transition-colors flex justify-between items-center text-xs">
-                                <div><span className="font-bold text-slate-800 block text-sm">{w.name_worker || w.name}</span><span className="text-slate-400 font-semibold uppercase text-[10px] block mt-0.5">{w.role}</span></div>
+                                <div><span className="font-bold text-slate-800 block text-sm">{w.name_worker || w.name}</span><span className="text-slate-500 font-semibold uppercase text-[10px] block mt-0.5">{w.role}</span></div>
                                 <div className="text-right"><span className="font-mono font-black text-slate-900 block">{formatCurrency(w.weekly_salary || 0)}</span><span className="text-[9px] text-slate-400 block mt-0.5 uppercase tracking-wide">Base Semanal</span></div>
                               </div>
                             ))}
@@ -1224,7 +1268,6 @@ export default function DashboardPage() {
                     </div>
                   )}
 
-                  {/* 🟢 RENDERING INTERACTIVO DE LA TABLA WEB DE RESGUARDOS / ALMACÉN (HOMOLOGADO CON APK) */}
                   {activeTab === 'resguardos' && (
                     <div className="p-8 flex flex-col space-y-6">
                       <div className="flex flex-col md:flex-row justify-between gap-4 items-center bg-white border border-slate-200 p-4 rounded-xl shadow-sm">
@@ -1240,8 +1283,8 @@ export default function DashboardPage() {
                         </div>
                         <div className="flex gap-2 shrink-0">
                           <button onClick={() => setFiltroUbicacionResguardo('todos')} className={`px-4 py-1.5 rounded-full text-xs font-bold border transition-all ${filtroUbicacionResguardo === 'todos' ? 'bg-slate-900 border-slate-900 text-white shadow-sm' : 'bg-white text-slate-600 border-slate-200'}`}>📋 Todos</button>
-                          <button onClick={() => setFiltroUbicacionResguardo('bodega')} className={`px-4 py-1.5 rounded-full text-xs font-bold border transition-all ${filtroUbicacionResguardo === 'bodega' ? 'bg-emerald-50 border-emerald-200 text-emerald-700 shadow-sm' : 'bg-white text-slate-600 border-slate-200'}`}>📦 En Bodega</button>
-                          <button onClick={() => setFiltroUbicacionResguardo('obra')} className={`px-4 py-1.5 rounded-full text-xs font-bold border transition-all ${filtroUbicacionResguardo === 'obra' ? 'bg-orange-50 border-orange-200 text-orange-700 shadow-sm' : 'bg-white text-slate-600 border-slate-200'}`}>🏗️ En Obra</button>
+                          <button onClick={() => setFiltroUbicacionResguardo('bodega')} className={`px-4 py-1.5 rounded-full text-xs font-bold border transition-all ${filtroUbicacionResguardo === 'bodega' ? 'bg-emerald-50 border-emerald-200 text-emerald-700 shadow-sm' : 'bg-white text-slate-600'}`}>📦 En Bodega</button>
+                          <button onClick={() => setFiltroUbicacionResguardo('obra')} className={`px-4 py-1.5 rounded-full text-xs font-bold border transition-all ${filtroUbicacionResguardo === 'obra' ? 'bg-orange-50 border-orange-200 text-orange-700 shadow-sm' : 'bg-white text-slate-600'}`}>🏗️ En Obra</button>
                         </div>
                       </div>
 
@@ -1259,13 +1302,13 @@ export default function DashboardPage() {
                           </thead>
                           <tbody className="divide-y divide-slate-100 bg-white">
                             {filteredHerramientasWeb.length === 0 ? (
-                              <tr><td colSpan={6} className="text-center py-12 text-slate-400 italic">No se encontraron herramientas que coincidan con los criterios de búsqueda.</td></tr>
+                              <tr><td colSpan={6} className="text-center py-12 text-slate-700 italic">No se encontraron herramientas que coincidan con los criterios de búsqueda.</td></tr>
                             ) : (
                               filteredHerramientasWeb.map((tool) => (
                                 <tr key={tool.id} className="hover:bg-slate-50/60 transition-colors">
                                   <td className="px-6 py-4 font-mono font-bold text-blue-600"><span className="bg-blue-50 px-2.5 py-1 rounded-md border border-blue-100 text-xs">{tool.codigo}</span></td>
                                   <td className="px-6 py-4 font-semibold text-slate-900">{tool.nombre}</td>
-                                  <td className="px-6 py-4 text-slate-600">{tool.marca_modelo}</td>
+                                  <td className="px-6 py-4 text-slate-700">{tool.marca_modelo}</td>
                                   <td className="px-6 py-4">
                                     <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${tool.ubicacion === 'obra' ? 'bg-orange-50 border-orange-200 text-orange-700' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
                                       {tool.ubicacion === 'obra' ? '🏗️ En Obra' : '📦 En Bodega'}
@@ -1275,9 +1318,9 @@ export default function DashboardPage() {
                                     {tool.ubicacion === 'obra' ? (
                                       <div className="flex flex-col">
                                         <span className="text-slate-900 font-bold">A cargo de: {tool.asignado_a}</span>
-                                        <span className="text-[10px] text-slate-400 mt-0.5 font-mono">Token: {tool.token_firma || 'N/A'}</span>
+                                        <span className="text-[10px] text-slate-500 mt-0.5 font-mono">Token: {tool.token_firma || 'N/A'}</span>
                                       </div>
-                                    ) : <span className="text-slate-400 italic text-xs">Almacenaje Central</span>}
+                                    ) : <span className="text-slate-700 font-medium bg-slate-100/70 px-2 py-0.5 rounded italic text-xs">Almacenaje Central</span>}
                                   </td>
                                   <td className="px-6 py-4 text-center">
                                     {tool.ubicacion === 'obra' ? (
@@ -1285,7 +1328,6 @@ export default function DashboardPage() {
                                         {tool.ine_url && (
                                           <a href={tool.ine_url} target="_blank" rel="noreferrer" className="text-blue-600 bg-blue-50 border border-blue-100 px-2.5 py-1 rounded-lg text-xs font-bold hover:bg-blue-600 hover:text-white transition-all">Ver INE</a>
                                         )}
-                                        {/* 🟢 BOTÓN CORREGIDO: Llama a ejecutarExportacionPDFWeb de forma nativa */}
                                         <button 
                                           onClick={() => ejecutarExportacionPDFWeb(tool)} 
                                           className="text-slate-700 bg-slate-100 border border-slate-200 px-2.5 py-1 rounded-lg text-xs font-bold hover:bg-slate-900 hover:text-white transition-all cursor-pointer"
@@ -1293,7 +1335,7 @@ export default function DashboardPage() {
                                           Reimprimir PDF
                                         </button>
                                       </div>
-                                    ) : <span className="text-slate-400 text-xs font-medium">-</span>}
+                                    ) : <span className="text-slate-700 font-medium bg-slate-100/70 px-2 py-0.5 rounded italic text-xs">-</span>}
                                   </td>
                                 </tr>
                               ))
@@ -1305,45 +1347,398 @@ export default function DashboardPage() {
                   )}
 
                   {activeTab === 'bitacora' && (
-                    <table className="w-full text-left text-sm">
+                    <table className="w-full text-left text-sm bg-white">
                       <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold"><tr><th className="px-8 py-4 w-48">Fecha y Hora</th><th className="px-8 py-4 w-40">Categoría</th><th className="px-8 py-4">Descripción de Actividad</th></tr></thead>
-                      <tbody className="divide-y divide-slate-100">{bitacoraRecords.map(r => (<tr key={r.id}><td className="px-8 py-4 text-slate-500 font-medium whitespace-nowrap align-top">{formatDate(r.created_at)}</td><td className="px-8 py-4 align-top"><span className="bg-blue-50 text-blue-700 text-xs font-bold px-2.5 py-1 rounded-md border border-blue-100">{r.category || 'General'}</span></td><td className="px-8 py-4 text-slate-800 leading-relaxed align-top"><p className="mb-2">{r.description}</p>{parsePhotos(r.photo_url).length > 0 && (<div className="flex gap-2 flex-wrap mt-2">{parsePhotos(r.photo_url).map((url: string, index: number) => (<a key={index} href={url} target="_blank" rel="noreferrer"><img src={url} alt="Evidencia" className="h-20 w-32 object-cover rounded-lg border border-slate-200" /></a>))}</div>)}</td></tr>))}</tbody>
+                      <tbody className="divide-y divide-slate-100">{bitacoraRecords.map(r => (<tr key={r.id}><td className="px-8 py-4 text-slate-600 font-medium whitespace-nowrap align-top">{formatDate(r.created_at)}</td><td className="px-8 py-4 align-top"><span className="bg-blue-50 text-blue-700 text-xs font-bold px-2.5 py-1 rounded-md border border-blue-100">{r.category || 'General'}</span></td><td className="px-8 py-4 text-slate-900 leading-relaxed align-top"><p className="mb-2">{r.description}</p>{parsePhotos(r.photo_url).length > 0 && (<div className="flex gap-2 flex-wrap mt-2">{parsePhotos(r.photo_url).map((url: string, index: number) => (<a key={index} href={url} target="_blank" rel="noreferrer"><img src={url} alt="Evidencia" className="h-20 w-32 object-cover rounded-lg border border-slate-200" /></a>))}</div>)}</td></tr>))}</tbody>
                     </table>
                   )}
 
                   {activeTab === 'planos' && (
-                    <table className="w-full text-left text-sm">
+                    <table className="w-full text-left text-sm bg-white">
                       <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold"><tr><th className="px-8 py-4">Nombre del Documento</th><th className="px-8 py-4 w-32">Categoría</th><th className="px-8 py-4 w-32">Versión</th><th className="px-8 py-4 w-48">Fecha de Subida</th><th className="px-8 py-4 w-32 text-center">Acción</th></tr></thead>
-                      <tbody className="divide-y divide-slate-100 bg-white">{planosRecords.filter(p => planoFilter === 'Todos' || p.categoria === planoFilter).map(p => (<tr key={p.id} className="hover:bg-slate-50/80"><td className="px-8 py-4 text-slate-900 font-medium">{p.name}</td><td className="px-8 py-4"><span className="bg-slate-100 text-slate-600 text-[10px] font-bold px-2.5 py-1 rounded border">{p.categoria}</span></td><td className="px-8 py-4 text-slate-600">{p.version}</td><td className="px-8 py-4 text-slate-500">{formatDate(p.created_at).split(',')[0]}</td><td className="px-6 py-4 text-center"><a href={p.file_url} target="_blank" rel="noreferrer" className="text-blue-600 font-bold text-xs hover:underline">Abrir Documento</a></td></tr>))}</tbody>
+                      <tbody className="divide-y divide-slate-100 bg-white">{planosRecords.filter(p => planoFilter === 'Todos' || p.categoria === planoFilter).map(p => (<tr key={p.id} className="hover:bg-slate-50/80"><td className="px-8 py-4 text-slate-900 font-medium">{p.name}</td><td className="px-8 py-4"><span className="bg-slate-100 text-slate-700 text-[10px] font-bold px-2.5 py-1 rounded border">{p.categoria || 'Planos'}</span></td><td className="px-8 py-4 text-slate-700 font-mono text-xs">{p.version}</td><td className="px-8 py-4 text-slate-600">{formatDate(p.created_at).split(',')[0]}</td><td className="px-6 py-4 text-center"><a href={p.file_url} target="_blank" rel="noreferrer" className="text-blue-600 font-bold text-xs hover:underline">Abrir Documento</a></td></tr>))}</tbody>
                     </table>
                   )}
                 </div>
               </div>
             </div>
-          ) : <div className="p-8 text-center text-slate-400">Selecciona una obra activa de la barra lateral para ver su desglose.</div>}
+          ) : <div className="p-8 text-center text-slate-700 italic">Selecciona una obra activa de la barra lateral para ver su desglose.</div>}
         </main>
       </div>
 
-      {/* MODALS CORRESPONDIENTES (GASTOS, PROYECTOS, ALTA WORKERS) */}
+      {/* 🔴 MODAL DE GASTOS CON INTERFAZ ADAPTADA Y ALCANCE PERFECTO */}
       {isExpenseModalOpen && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
-          <div className="bg-white rounded-3xl w-full max-w-lg shadow-xl border border-slate-100 p-6 overflow-hidden">
-            <h3 className="text-base font-bold text-slate-900 mb-4">Registrar Erogación de Caja</h3>
-            <form onSubmit={handleSaveGasto} className="space-y-4">
-              <div><label className="text-xs font-bold text-slate-500 block mb-1">Concepto o Descripción</label><input type="text" required value={conceptoGasto} onChange={(e) => setConceptoGasto(e.target.value)} className="w-full border rounded-xl px-3 py-2 text-sm text-slate-900" /></div>
-              <div className="grid grid-cols-2 gap-4">
-                <div><label className="text-xs font-bold text-slate-500 block mb-1">Cantidad / Insumo</label><input type="number" step="any" required value={cantidadGasto} onChange={(e) => setCantidadGasto(e.target.value)} className="w-full border rounded-xl px-3 py-2 text-sm" /></div>
-                <div><label className="text-xs font-bold text-slate-500 block mb-1">Precio Unitario ($)</label><input type="number" step="0.01" required value={precioUnitarioGasto} onChange={(e) => setPrecioUnitarioGasto(e.target.value)} className="w-full border rounded-xl px-3 py-2 text-sm" /></div>
+          <div className="bg-white rounded-3xl w-full max-w-xl shadow-2xl border border-slate-100 overflow-hidden flex flex-col max-h-[90vh]">
+            
+            {/* Cabecera del Modal */}
+            <div className="px-6 py-4 bg-slate-50 border-b border-slate-100 flex justify-between items-center shrink-0">
+              <h3 className="text-lg font-black text-slate-800">
+                {expenseSubTab === 'generales' && '🧱 Registro Estructural'}
+                {expenseSubTab === 'caja_chica' && '💵 Libro Mayor de Caja'}
+                {expenseSubTab === 'maquinaria' && '🚜 Directorio de Maquinaria'}
+                {expenseSubTab === 'destajos' && '🛠️ Nuevo Registro de Destajo'}
+              </h3>
+              <button onClick={() => setIsExpenseModalOpen(false)} className="text-slate-400 hover:text-slate-600 transition-colors p-1.5 rounded-lg bg-white shadow-sm border">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+
+            {/* Sub-Tabs de selección rápida dentro del Modal */}
+            <div className="px-6 py-3 border-b bg-white flex gap-2 overflow-x-auto shrink-0">
+              <button type="button" onClick={() => setExpenseSubTab('generales')} className={`px-4 py-1.5 rounded-full text-xs font-bold border transition-all ${expenseSubTab === 'generales' ? 'bg-blue-600 border-blue-600 text-white shadow-sm' : 'bg-slate-50 text-slate-600'}`}>🧱 Materiales</button>
+              <button type="button" onClick={() => setExpenseSubTab('caja_chica')} className={`px-4 py-1.5 rounded-full text-xs font-bold border transition-all ${expenseSubTab === 'caja_chica' ? 'bg-blue-600 border-blue-600 text-white shadow-sm' : 'bg-slate-50 text-slate-600'}`}>💵 Caja Chica</button>
+              <button type="button" onClick={() => setExpenseSubTab('maquinaria')} className={`px-4 py-1.5 rounded-full text-xs font-bold border transition-all ${expenseSubTab === 'maquinaria' ? 'bg-blue-600 border-blue-600 text-white shadow-sm' : 'bg-slate-50 text-slate-600'}`}>🚜 Maquinaria</button>
+              <button type="button" onClick={() => setExpenseSubTab('destajos')} className={`px-4 py-1.5 rounded-full text-xs font-bold border transition-all ${expenseSubTab === 'destajos' ? 'bg-blue-600 border-blue-600 text-white shadow-sm' : 'bg-slate-50 text-slate-600'}`}>🛠️ Destajos</button>
+            </div>
+            
+            <form onSubmit={handleSaveGasto} className="p-6 space-y-5 overflow-y-auto flex-1 bg-slate-50/40">
+              {expenseFormError && <div className="p-3 bg-red-50 text-red-600 text-xs rounded-xl border border-red-100">{expenseFormError}</div>}
+              
+              <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+                <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Fecha de Operación</label>
+                <input type="date" required value={fechaGasto} onChange={(e) => setFechaGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 font-medium focus:border-blue-500 focus:outline-none bg-slate-50" />
               </div>
-              <div className="bg-slate-50 p-3 rounded-xl flex justify-between items-center"><span className="text-xs font-bold text-slate-500">Monto Final:</span><span className="font-mono font-black text-slate-900 text-sm">{montoGasto ? formatCurrency(parseFloat(montoGasto)) : '$0.00'}</span></div>
-              <div className="flex justify-end gap-2 pt-4 border-t"><button type="button" onClick={() => setIsExpenseModalOpen(false)} className="px-4 py-2 text-xs font-bold text-slate-500">Cerrar</button><button type="submit" className="bg-blue-600 text-white text-xs font-bold px-5 py-2 rounded-xl">Insertar</button></div>
+
+              {/* 1. FORMULARIO: GASTOS GENERALES / MATERIALES */}
+              {expenseSubTab === 'generales' && (
+                <div className="space-y-4">
+                  <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+                    <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider">Clasificación del Rubro</label>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      {[
+                        { id: 'Material', label: '📦 Material' },
+                        { id: 'Admin', label: '📄 Admin' },
+                        { id: 'Burócrata', label: '🛡️ Burócrata' },
+                        { id: 'Asesoría', label: '👥 Asesoría' }
+                      ].map((rubro) => (
+                        <button type="button" key={rubro.id} onClick={() => setRubroClasificacion(rubro.id)} className={`py-2 px-1 text-xs font-bold rounded-xl border transition-all ${rubroClasificacion === rubro.id ? 'bg-amber-500 border-amber-500 text-white shadow-md' : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'}`}>{rubro.label}</button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+                    <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider">Estado de Pago</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {['Liquidado', 'Abono', 'Por Pagar'].map((estado) => (
+                        <button type="button" key={estado} onClick={() => setEstadoPago(estado)} className={`py-2 text-xs font-bold rounded-xl border transition-all ${estadoPago === estado ? 'bg-emerald-500 border-emerald-500 text-white shadow-md' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>{estado}</button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+                      <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Unidad de Medida</label>
+                      <input type="text" placeholder="Ej. Pzas / Ton" value={unidadGasto} onChange={(e) => setUnidadGasto(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm focus:outline-none focus:border-blue-500 font-medium bg-slate-50" />
+                    </div>
+                    <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+                      <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Monto Abonado</label>
+                      <input type="text" disabled placeholder="N/A" className="w-full rounded-xl border px-3 py-2 text-sm font-medium bg-slate-100 text-slate-400 cursor-not-allowed" />
+                    </div>
+                  </div>
+
+                  <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+                    <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Concepto o Descripción</label>
+                    <input type="text" required placeholder="Ej. Varilla de 3/8, Licencia estatal..." value={conceptoGasto} onChange={(e) => setConceptoGasto(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm font-medium focus:outline-none focus:border-blue-500 bg-slate-50" />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+                      <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Cantidad</label>
+                      <input type="number" step="any" placeholder="Ej. 1" value={cantidadGasto} onChange={(e) => setCantidadGasto(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm font-medium focus:outline-none bg-slate-50" />
+                    </div>
+                    <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+                      <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Precio Unitario ($)</label>
+                      <input type="number" step="0.01" placeholder="0.00" value={precioUnitarioGasto} onChange={(e) => setPrecioUnitarioGasto(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm font-medium focus:outline-none bg-slate-50" />
+                    </div>
+                  </div>
+
+                  <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+                    <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Número de Cotización (Opcional)</label>
+                    <input type="text" placeholder="Ej. COT-OBRA-023" value={numCotizacion} onChange={(e) => setNumCotizacion(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm font-medium focus:outline-none bg-slate-50" />
+                  </div>
+
+                  <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+                    <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Proveedor de Materiales</label>
+                    <input type="text" placeholder="Nombre o Razón social..." value={proveedorGasto} onChange={(e) => setProveedorGasto(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm font-medium focus:outline-none bg-slate-50" />
+                  </div>
+                </div>
+              )}
+
+              {/* 2. FORMULARIO: LIBRO MAYOR DE CAJA / CAJA CHICA */}
+              {expenseSubTab === 'caja_chica' && (
+                <div className="space-y-4">
+                  <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-sm flex p-1.5 bg-slate-100">
+                    <button type="button" onClick={() => setSubTipoCajaChica('Inversion')} className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${subTipoCajaChica === 'Inversion' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'}`}>🏦 Registrar Inversión</button>
+                    <button type="button" onClick={() => setSubTipoCajaChica('Gasto')} className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${subTipoCajaChica === 'Gasto' ? 'bg-red-500 text-white shadow-sm' : 'text-slate-500'}`}>📥 Registrar Gasto</button>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+                      <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">No. Nota</label>
+                      <input type="text" placeholder="Opcional" value={numNota} onChange={(e) => setNumNota(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm font-medium focus:outline-none bg-slate-50" />
+                    </div>
+                    <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+                      <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Responsable</label>
+                      <input type="text" placeholder="Nombre" value={responsableGasto} onChange={(e) => setResponsableGasto(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm font-medium focus:outline-none bg-slate-50" />
+                    </div>
+                  </div>
+
+                  <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+                    <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Artículos Comprados</span>
+                    <div className="p-3 bg-slate-50 border rounded-xl space-y-2.5">
+                      <span className="text-[9px] font-black text-slate-400 tracking-wider block">ARTÍCULO 1</span>
+                      <input type="text" required placeholder="Concepto (Ej. Clavos 2 pulg)" value={conceptoGasto} onChange={(e) => setConceptoGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-medium bg-white" />
+                      <div className="grid grid-cols-3 gap-2">
+                        <input type="number" placeholder="1" value={cantidadGasto} onChange={(e) => setCantidadGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-medium bg-white" />
+                        <input type="text" placeholder="Unidad" value={unidadGasto} onChange={(e) => setUnidadGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-medium bg-white" />
+                        <input type="number" required placeholder="P.U ($)" value={precioUnitarioGasto} onChange={(e) => setPrecioUnitarioGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-medium bg-white" />
+                      </div>
+                    </div>
+                    <button type="button" className="w-full py-2 border border-dashed border-blue-300 text-blue-600 text-xs font-bold rounded-xl bg-blue-50/40 hover:bg-blue-50">+ Agregar otro artículo</button>
+                  </div>
+
+                  <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+                    <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Nota / Justificación Adicional</label>
+                    <textarea rows={2} placeholder="Ej. Compra urgente para loza..." value={justificacionCaja} onChange={(e) => setJustificacionCaja(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm font-medium focus:outline-none bg-slate-50" />
+                  </div>
+                </div>
+              )}
+
+              {/* 3. FORMULARIO: DIRECTORIO DE MAQUINARIA */}
+              {expenseSubTab === 'maquinaria' && (
+                <div className="space-y-4">
+                  <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+                    <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Nombre del Equipo</label>
+                    <input type="text" required placeholder="Ej. Retroexcavadora CAT 320" value={nombreEquipo} onChange={(e) => setNombreEquipo(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm font-medium focus:outline-none bg-slate-50" />
+                  </div>
+
+                  <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+                    <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Proveedor</label>
+                    <input type="text" placeholder="Ej. Arrendadora del Centro" value={proveedorGasto} onChange={(e) => setProveedorGasto(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm font-medium focus:outline-none bg-slate-50" />
+                  </div>
+
+                  <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+                    <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider">Corte de Facturación / Modalidad</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {['Por Día', 'Por Semana', 'Por Mes'].map((mod) => (
+                        <button type="button" key={mod} onClick={() => setModalidadFacturacion(mod)} className={`py-2 text-xs font-bold rounded-xl border transition-all ${modalidadFacturacion === mod ? 'bg-blue-600 border-blue-600 text-white shadow-md' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>{mod}</button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+                      <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Tarifa por HORA ($)</label>
+                      <input type="number" required placeholder="Ej. 1200" value={precioUnitarioGasto} onChange={(e) => setPrecioUnitarioGasto(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm font-medium focus:outline-none bg-slate-50" />
+                    </div>
+                    <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+                      <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Horas Totales</label>
+                      <input type="number" required placeholder="Ej. 10" value={cantidadGasto} onChange={(e) => setCantidadGasto(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm font-medium focus:outline-none bg-slate-50" />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* 4. FORMULARIO: DESTAJOS */}
+              {expenseSubTab === 'destajos' && (
+                <div className="space-y-4">
+                  <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+                    <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Semana de Registro</label>
+                    <input type="text" disabled placeholder="Periodo Semanal Automático" className="w-full rounded-xl border px-3 py-2 text-sm font-medium bg-slate-100 text-slate-500 cursor-not-allowed" />
+                  </div>
+
+                  <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+                    <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Concepto / Actividad</label>
+                    <input type="text" required placeholder="Ej. Cemento Cruz Azul 50kg" value={conceptoGasto} onChange={(e) => setConceptoGasto(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm font-medium focus:outline-none bg-slate-50" />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+                      <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Unidad</label>
+                      <input type="text" placeholder="Ej. Bulto" value={unidadGasto} onChange={(e) => setUnidadGasto(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm font-medium focus:outline-none bg-slate-50" />
+                    </div>
+                    <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+                      <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">P.U / Mano de Obra $</label>
+                      <input type="number" required placeholder="Ej. 250" value={precioUnitarioGasto} onChange={(e) => setPrecioUnitarioGasto(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm font-medium focus:outline-none bg-slate-50" />
+                    </div>
+                  </div>
+
+                  <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+                    <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Vol. / Cant. (Para esta semana)</label>
+                    <input type="number" required placeholder="Ej. 10" value={cantidadGasto} onChange={(e) => setCantidadGasto(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm font-medium focus:outline-none bg-slate-50" />
+                  </div>
+
+                  <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-2">
+                    <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider">Encargado / Recibe (Opcional)</label>
+                    <input type="text" placeholder="Nombre del responsable..." value={encargadoRecibeDestajo} onChange={(e) => setEncargadoRecibeDestajo(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm bg-slate-50" />
+                    <div className="flex gap-1.5 flex-wrap pt-1">
+                      {['Luis', 'Angel'].map((name) => (
+                        <button type="button" key={`recibe-${name}`} onClick={() => setEncargadoRecibeDestajo(name)} className={`px-3 py-1 rounded-lg text-xs font-bold border transition-all ${encargadoRecibeDestajo === name ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-white text-slate-500'}`}>{name}</button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-2">
+                    <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider">Solicitado por (Opcional)</label>
+                    <input type="text" placeholder="Quién pide el material..." value={solicitadoPorDestajo} onChange={(e) => setSolicitadoPorDestajo(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm bg-slate-50" />
+                    <div className="flex gap-1.5 flex-wrap pt-1">
+                      {['Luis', 'Angel'].map((name) => (
+                        <button type="button" key={`solicita-${name}`} onClick={() => setSolicitadoPorDestajo(name)} className={`px-3 py-1 rounded-lg text-xs font-bold border transition-all ${solicitadoPorDestajo === name ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-white text-slate-500'}`}>{name}</button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Bloque Consolidado Inferior del Importe */}
+              <div className="bg-slate-900 text-white rounded-2xl p-4 mt-4 shadow-md flex justify-between items-center shrink-0">
+                <div className="flex flex-col">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Importe Total Calculado</span>
+                  <span className="text-2xl font-black text-emerald-400 font-mono mt-0.5">
+                    {montoGasto ? formatCurrency(parseFloat(montoGasto)) : '$0.00'}
+                  </span>
+                </div>
+                <div className="text-right text-[10px] text-slate-400 font-semibold uppercase tracking-wide">
+                  Sincronizado con Almacén 🔒
+                </div>
+              </div>
+
+              {/* Botones de Acción */}
+              <div className="pt-4 flex justify-end gap-3 border-t border-slate-100 mt-6 shrink-0">
+                <button type="button" onClick={() => setIsExpenseModalOpen(false)} className="px-4 py-2 text-sm font-bold text-slate-500 hover:bg-slate-100 rounded-xl transition-all">Cancelar</button>
+                <button type="submit" disabled={loadingExpenseForm || !montoGasto} className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold px-6 py-2 rounded-xl shadow-lg shadow-blue-600/20 transition-all disabled:opacity-50">Guardar Registro</button>
+              </div>
             </form>
           </div>
         </div>
       )}
 
+      {/* 🟢 MODAL DE PROYECTOS ACTUALIZADO CON FORMULARIO COMPLETO */}
       {isProjectModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4"><div className="bg-white rounded-2xl w-full max-w-md p-6"><h3 className="text-base font-bold text-slate-900 mb-4">Alta de Nueva Obra</h3><form onSubmit={handleCreateProject} className="space-y-4"><div><label className="text-xs font-bold block mb-1">Nombre</label><input type="text" required value={newProjectName} onChange={(e) => setNewProjectName(e.target.value)} className="w-full border rounded-xl px-3 py-2 text-sm" /></div><div className="flex justify-end gap-2"><button type="button" onClick={() => setIsProjectModalOpen(false)} className="px-4 py-2 text-xs font-bold text-slate-500">Cerrar</button><button type="submit" className="bg-slate-900 text-white text-xs font-bold px-4 py-2 rounded-xl">Insertar</button></div></form></div></div>
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-3xl w-full max-w-md p-6 shadow-2xl border border-slate-100 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-black text-slate-800">Alta de Nueva Obra</h3>
+              <button onClick={() => setIsProjectModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 bg-slate-50 rounded-lg border">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateProject} className="space-y-4">
+              {projectFormError && (
+                <div className="p-3 bg-red-50 text-red-600 text-xs rounded-xl border border-red-100">
+                  {projectFormError}
+                </div>
+              )}
+
+              <div>
+                <label className="text-xs font-bold text-slate-400 block uppercase mb-1">Nombre de la Obra *</label>
+                <input 
+                  type="text" 
+                  required 
+                  placeholder="Ej. Residencial Palmas"
+                  value={newProjectName} 
+                  onChange={(e) => setNewProjectName(e.target.value)} 
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-slate-50 focus:outline-none focus:border-blue-500 font-medium" 
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-400 block uppercase mb-1">Cliente *</label>
+                <input 
+                  type="text" 
+                  required 
+                  placeholder="Nombre del inversionista o empresa"
+                  value={newProjectCliente} 
+                  onChange={(e) => setNewProjectCliente(e.target.value)} 
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-slate-50 focus:outline-none focus:border-blue-500 font-medium" 
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-400 block uppercase mb-1">No. de Contrato *</label>
+                <input 
+                  type="text" 
+                  required 
+                  placeholder="Ej. CONT-2026-001"
+                  value={newProjectNumContrato} 
+                  onChange={(e) => setNewProjectNumContrato(e.target.value)} 
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-slate-50 focus:outline-none focus:border-blue-500 font-medium font-mono" 
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-400 block uppercase mb-1">Ubicación de la Obra *</label>
+                <input 
+                  type="text" 
+                  required 
+                  placeholder="Ej. San Pablo del Monte, Tlaxcala"
+                  value={newProjectUbicacion} 
+                  onChange={(e) => setNewProjectUbicacion(e.target.value)} 
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-slate-50 focus:outline-none focus:border-blue-500 font-medium" 
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-400 block uppercase mb-1">Fecha Inicio</label>
+                  <input 
+                    type="date" 
+                    value={newProjectFechaInicio} 
+                    onChange={(e) => setNewProjectFechaInicio(e.target.value)} 
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2 text-xs bg-slate-50 focus:outline-none" 
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-400 block uppercase mb-1">Fecha Fin</label>
+                  <input 
+                    type="date" 
+                    value={newProjectFechaFin} 
+                    onChange={(e) => setNewProjectFechaFin(e.target.value)} 
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2 text-xs bg-slate-50 focus:outline-none" 
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-400 block uppercase mb-1">Residente de Campo Encargado *</label>
+                <select
+                  required
+                  value={selectedResidentId}
+                  onChange={(e) => setSelectedResidentId(e.target.value)}
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-slate-50 focus:outline-none focus:border-blue-500 font-medium"
+                >
+                  <option value="">-- Seleccionar Residente --</option>
+                  {residents.map((res) => (
+                    <option key={res.id} value={res.id}>
+                      {res.full_name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-4 border-t border-slate-100 mt-6">
+                <button 
+                  type="button" 
+                  onClick={() => setIsProjectModalOpen(false)} 
+                  className="px-4 py-2 text-sm font-bold text-slate-500 hover:bg-slate-100 rounded-xl transition-all"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="submit" 
+                  disabled={loadingProjectForm}
+                  className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold px-6 py-2 rounded-xl shadow-lg shadow-blue-600/20 transition-all disabled:opacity-50"
+                >
+                  {loadingProjectForm ? 'Creando...' : 'Crear Obra'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
 
       {isWorkerModalOpen && (
