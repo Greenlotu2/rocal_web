@@ -3,18 +3,18 @@
 import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useUser } from '../context/UserContext'; 
-import { supabase } from '../../lib/supabase'; // Ajusta la ruta a tu cliente de Supabase
+import { supabase } from '../../lib/supabase';
 export const dynamic = 'force-dynamic';
 
 export default function PerfilUsuarioWeb() {
   const router = useRouter();
   const { profile, isLoadingUser } = useUser(); 
-  const fileInputRef = useRef<HTMLInputElement>(null); // 🟢 Referencia para abrir el selector de archivos
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false); 
-  const [isUploading, setIsUploading] = useState(false); // 🟢 Estado de carga de la foto
+  const [isUploading, setIsUploading] = useState(false);
   const [imageUrl, setImageUrl] = useState<string | null>(null); 
   const [formData, setFormData] = useState({
     full_name: '',
@@ -23,7 +23,6 @@ export default function PerfilUsuarioWeb() {
     direccion: ''
   });
 
-  // Cargar la información del perfil y resolver la foto de perfil desde el bucket
   useEffect(() => {
     if (profile) {
       setFormData({
@@ -33,7 +32,6 @@ export default function PerfilUsuarioWeb() {
         direccion: profile.direccion || ''
       });
 
-      // Obtener la URL de la foto de perfil desde el bucket
       const campoFoto = (profile as any).avatar_url || (profile as any).foto_perfil_url;
 
       if (campoFoto) {
@@ -41,7 +39,7 @@ export default function PerfilUsuarioWeb() {
           setImageUrl(campoFoto);
         } else {
           const { data } = supabase.storage
-            .from('avatars') // ⚠️ Ajusta al nombre exacto de tu bucket si es diferente
+            .from('avatars')
             .getPublicUrl(campoFoto);
           
           if (data?.publicUrl) {
@@ -57,7 +55,6 @@ export default function PerfilUsuarioWeb() {
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  // 🟢 FUNCIÓN PARA CARGAR Y CAMBIAR LA FOTO DE PERFIL EN EL BUCKET
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !profile?.id) return;
@@ -65,17 +62,14 @@ export default function PerfilUsuarioWeb() {
     setIsUploading(true);
     try {
       const fileExt = file.name.split('.').pop();
-      // Creamos un path único usando el ID del usuario y un timestamp para evitar problemas de caché
       const filePath = `${profile.id}/${Date.now()}.${fileExt}`;
 
-      // 1. Subir el archivo físico al storage de Supabase
       const { error: uploadError } = await supabase.storage
         .from('avatars')
         .upload(filePath, file, { cacheControl: '3600', upsert: true });
 
       if (uploadError) throw uploadError;
 
-      // 2. Obtener la nueva URL pública
       const { data: urlData } = supabase.storage
         .from('avatars')
         .getPublicUrl(filePath);
@@ -83,12 +77,10 @@ export default function PerfilUsuarioWeb() {
       const nuevaUrl = urlData?.publicUrl;
       if (!nuevaUrl) throw new Error('No se pudo generar la URL pública del archivo.');
 
-      // 3. Determinar qué columna usa tu base de datos y actualizar el registro en la tabla profiles
       const columnasActualizar: any = {};
       if ('avatar_url' in profile) columnasActualizar.avatar_url = filePath;
       if ('foto_perfil_url' in profile) columnasActualizar.foto_perfil_url = filePath;
       
-      // Por seguridad si no detecta ninguna en el tipo, intentamos actualizar ambas por si acaso
       if (Object.keys(columnasActualizar).length === 0) {
         columnasActualizar.avatar_url = filePath;
       }
@@ -100,7 +92,6 @@ export default function PerfilUsuarioWeb() {
 
       if (dbError) throw dbError;
 
-      // 4. Actualizar el estado visual del componente y refrescar la sesión
       setImageUrl(nuevaUrl);
       alert('¡Fotografía de perfil actualizada con éxito!');
       router.refresh();
@@ -137,7 +128,6 @@ export default function PerfilUsuarioWeb() {
     }
   };
 
-  // FUNCIÓN MAESTRA DE ELIMINACIÓN
   const handleEliminarCuenta = async () => {
     if (!profile?.id) return;
 
@@ -165,6 +155,7 @@ export default function PerfilUsuarioWeb() {
       alert('El usuario ha sido removido exitosamente del sistema.');
       await supabase.auth.signOut();
       router.push('/login');
+      router.refresh();
     } catch (err: any) {
       alert('Error al eliminar la cuenta: ' + err.message);
       setIsDeleting(false);
@@ -183,13 +174,16 @@ export default function PerfilUsuarioWeb() {
     <div className="min-h-screen bg-slate-50 py-8 px-4 sm:px-8">
       <div className="max-w-4xl mx-auto w-full">
         
-        {/* Botón para regresar al Dashboard */}
-        <button onClick={() => router.back()} className="mb-8 flex items-center gap-2 text-slate-500 hover:text-blue-600 font-bold text-sm transition-colors">
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
+        <button 
+          onClick={() => router.back()} 
+          className="mb-8 flex items-center gap-2 text-slate-500 hover:text-blue-600 font-bold text-sm transition-colors cursor-pointer"
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+          </svg>
           Volver al Tablero
         </button>
 
-        {/* Encabezado del Perfil */}
         <header className="mb-10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <h1 className="text-3xl font-black text-slate-900">Mi Perfil Profesional</h1>
@@ -197,7 +191,6 @@ export default function PerfilUsuarioWeb() {
           </div>
           <div className="flex items-center gap-3 self-start sm:self-auto">
             
-            {/* BOTÓN DE ELIMINAR CUENTA COMPLETA */}
             {!isEditing && (
               <button
                 onClick={handleEliminarCuenta}
@@ -227,7 +220,7 @@ export default function PerfilUsuarioWeb() {
               <button
                 onClick={() => setIsEditing(false)}
                 disabled={isSaving}
-                className="px-4 py-2 rounded-xl text-sm font-bold bg-slate-200 text-slate-700 hover:bg-slate-300 transition-colors"
+                className="px-4 py-2 rounded-xl text-sm font-bold bg-slate-200 text-slate-700 hover:bg-slate-300 transition-colors cursor-pointer"
               >
                 Cancelar
               </button>
@@ -241,19 +234,18 @@ export default function PerfilUsuarioWeb() {
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
           
-          {/* Columna Izquierda: Foto de perfil desde el Bucket con función de Edición */}
           <div className="space-y-6">
             <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm text-center">
               
-              {/* Contenedor del Avatar con Input oculto y hover interactivo */}
               <div className="relative w-32 h-32 mx-auto mb-5 group rounded-full overflow-hidden border-4 border-white shadow-md bg-slate-100 flex items-center justify-center">
                 {imageUrl ? (
                   <img src={imageUrl} className="w-full h-full object-cover" alt="Foto de Perfil" />
                 ) : (
-                  <svg className="w-12 h-12 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+                  <svg className="w-12 h-12 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                  </svg>
                 )}
 
-                {/* 🟢 Capa sobrepuesta para cambiar foto al hacer Hover */}
                 <button
                   type="button"
                   disabled={isUploading}
@@ -270,7 +262,6 @@ export default function PerfilUsuarioWeb() {
                   )}
                 </button>
 
-                {/* Input HTML oculto controlado por la referencia */}
                 <input 
                   type="file"
                   ref={fileInputRef}
@@ -280,8 +271,12 @@ export default function PerfilUsuarioWeb() {
                 />
               </div>
 
-              <h2 className="text-xl font-bold text-slate-900">{isEditing ? formData.full_name || 'Escribiendo...' : profile?.full_name || 'Sin nombre'}</h2>
-              <p className="text-sm font-medium text-slate-500 mt-1">{profile?.carrera_especialidad || 'Especialidad no definida'}</p>
+              <h2 className="text-xl font-bold text-slate-900">
+                {isEditing ? formData.full_name || 'Escribiendo...' : profile?.full_name || 'Sin nombre'}
+              </h2>
+              <p className="text-sm font-medium text-slate-500 mt-1">
+                {profile?.carrera_especialidad || 'Especialidad no definida'}
+              </p>
             </div>
 
             <div className="bg-slate-900 p-6 rounded-3xl text-white shadow-md">
@@ -293,11 +288,12 @@ export default function PerfilUsuarioWeb() {
             </div>
           </div>
 
-          {/* Columna Derecha: Detalles del Expediente */}
           <div className="md:col-span-2 space-y-6">
             <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm">
               <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-6 flex items-center gap-2">
-                <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V8a2 2 0 00-2-2h-5m-4 0V5a2 2 0 114 0v1m-4 0a2 2 0 104 0m-5 8a2 2 0 100-4 2 2 0 000 4zm0 0c1.306 0 2.417.835 2.83 2M9 14a3.001 3.001 0 00-2.83 2M15 11h3m-3 4h2" /></svg>
+                <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V8a2 2 0 00-2-2h-5m-4 0V5a2 2 0 114 0v1m-4 0a2 2 0 104 0m-5 8a2 2 0 100-4 2 2 0 000 4zm0 0c1.306 0 2.417.835 2.83 2M9 14a3.001 3.001 0 00-2.83 2M15 11h3m-3 4h2" />
+                </svg>
                 Información de Contacto y Legal
               </h3>
               
