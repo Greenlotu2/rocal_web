@@ -351,15 +351,13 @@ export default function DashboardPage() {
     return payrollRecords.reduce((sum, p) => sum + Number(p.final_salary || 0), 0);
   }, [payrollRecords]);
 
-  const handleSaveGasto = async (e: React.FormEvent) => {
+const handleSaveGasto = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedProject) return;
     setLoadingExpenseForm(true); 
     setExpenseFormError(null);
 
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const userId = session?.user?.id || null;
       let error: any = null;
 
       switch (expenseSubTab) {
@@ -371,15 +369,13 @@ export default function DashboardPage() {
             cantidad: cantidadGasto ? parseFloat(cantidadGasto) : null,
             precio_unitario: precioUnitarioGasto ? parseFloat(precioUnitarioGasto) : null,
             monto: parseFloat(montoGasto),
-            tipo: tipoGasto,
+            categoria: rubroClasificacion || 'General', // 🟢 Mapeado a la columna real 'categoria'
             proveedor: proveedorGasto || null,
-            fecha: fechaGasto,
+            fecha: fechaGasto ? new Date(fechaGasto).toISOString() : new Date().toISOString(),
             is_active: true,
-            id_residente: userId
+            estado_pago: estadoPago || 'pagado',
+            numero_cotizacion: numCotizacion || null
           };
-          if (rubroClasificacion) payloadGenerales.clasificacion_rubro = rubroClasificacion;
-          if (estadoPago) payloadGenerales.estado_pago = estadoPago;
-          if (numCotizacion) payloadGenerales.numero_cotizacion = numCotizacion;
 
           const resGen = await supabase.from('gastos_generales').insert([payloadGenerales]);
           error = resGen.error;
@@ -388,12 +384,16 @@ export default function DashboardPage() {
         case 'caja_chica':
           const resCaja = await supabase.from('caja_chica').insert([{
             project_id: selectedProject.id,
-            fecha: fechaGasto,
+            fecha: fechaGasto ? new Date(fechaGasto).toISOString() : new Date().toISOString(),
             encargado: responsableGasto || 'Oficina',
             concepto: conceptoGasto,
             monto: parseFloat(montoGasto),
             justificacion: justificacionCaja || null,
-            numero_nota: numNota || null
+            numero_nota: numNota || null,
+            cantidad: cantidadGasto ? parseFloat(cantidadGasto) : 1,
+            precio_unitario: precioUnitarioGasto ? parseFloat(precioUnitarioGasto) : parseFloat(montoGasto),
+            unidad: unidadGasto || null,
+            is_active: true
           }]);
           error = resCaja.error;
           break;
@@ -402,11 +402,15 @@ export default function DashboardPage() {
           const resMaq = await supabase.from('gastos_maquinaria').insert([{
             project_id: selectedProject.id,
             equipo: nombreEquipo || conceptoGasto,
+            concepto: conceptoGasto || nombreEquipo || 'Renta de Maquinaria', // 🟢 Campo NOT NULL obligatorio
             proveedor: proveedorGasto || null,
-            fecha: fechaGasto,
+            fecha: fechaGasto ? new Date(fechaGasto).toISOString() : new Date().toISOString(),
             monto: parseFloat(montoGasto),
             asistencia_dias: cantidadGasto ? parseFloat(cantidadGasto) : null,
+            costo_tarifa: precioUnitarioGasto ? parseFloat(precioUnitarioGasto) : null,
+            tipo_renta: modalidadFacturacion || 'Por Semana',
             categoria: 'renta',
+            is_active: true
           }]); 
           error = resMaq.error;
           break;
@@ -415,12 +419,13 @@ export default function DashboardPage() {
           const resInv = await supabase.from('inventory').insert([{
             project_id: selectedProject.id,
             name: conceptoGasto, 
-            unit: unidadGasto || null, 
+            unit: unidadGasto || 'pza', 
             quantity: cantidadGasto ? parseFloat(cantidadGasto) : 1, 
             unit_price: precioUnitarioGasto ? parseFloat(precioUnitarioGasto) : 0, 
             in_charge: encargadoRecibeDestajo || null, 
             requested_by: solicitadoPorDestajo || null,       
-            created_at: new Date().toISOString()
+            is_active: true,
+            created_at: fechaGasto ? new Date(fechaGasto).toISOString() : new Date().toISOString()
           }]);
           error = resInv.error;
           break;
@@ -428,6 +433,7 @@ export default function DashboardPage() {
 
       if (error) throw error;
 
+      // Limpieza de campos tras inserción exitosa
       setConceptoGasto(''); setUnidadGasto(''); setCantidadGasto(''); setPrecioUnitarioGasto(''); 
       setMontoGasto(''); setProveedorGasto(''); setNumNota(''); setResponsableGasto(''); setJustificacionCaja('');
       setNombreEquipo(''); setNumCotizacion(''); setEncargadoRecibeDestajo(''); setSolicitadoPorDestajo('');
@@ -1399,7 +1405,7 @@ export default function DashboardPage() {
               
               <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
                 <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Fecha de Operación</label>
-                <input type="date" required value={fechaGasto} onChange={(e) => setFechaGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 font-medium focus:border-blue-500 focus:outline-none bg-slate-50" />
+                <input type="date" required value={fechaGasto} onChange={(e) => setFechaGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-black text-slate-800 font-medium focus:border-blue-500 focus:outline-none bg-slate-50" />
               </div>
 
               {/* 1. FORMULARIO: GASTOS GENERALES / MATERIALES */}
@@ -1431,38 +1437,38 @@ export default function DashboardPage() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
                       <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Unidad de Medida</label>
-                      <input type="text" placeholder="Ej. Pzas / Ton" value={unidadGasto} onChange={(e) => setUnidadGasto(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm focus:outline-none focus:border-blue-500 font-medium bg-slate-50" />
+                      <input type="text" placeholder="Ej. Pzas / Ton" value={unidadGasto} onChange={(e) => setUnidadGasto(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-black focus:outline-none focus:border-blue-500 font-medium bg-slate-50" />
                     </div>
                     <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
                       <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Monto Abonado</label>
-                      <input type="text" disabled placeholder="N/A" className="w-full rounded-xl border px-3 py-2 text-sm font-medium bg-slate-100 text-slate-400 cursor-not-allowed" />
+                      <input type="text" disabled placeholder="N/A" className="w-full rounded-xl border px-3 py-2 text-black font-medium bg-slate-100 text-slate-400 cursor-not-allowed" />
                     </div>
                   </div>
 
                   <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
                     <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Concepto o Descripción</label>
-                    <input type="text" required placeholder="Ej. Varilla de 3/8, Licencia estatal..." value={conceptoGasto} onChange={(e) => setConceptoGasto(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm font-medium focus:outline-none focus:border-blue-500 bg-slate-50" />
+                    <input type="text" required placeholder="Ej. Varilla de 3/8, Licencia estatal..." value={conceptoGasto} onChange={(e) => setConceptoGasto(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-black font-medium focus:outline-none focus:border-blue-500 bg-slate-50" />
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
                     <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
                       <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Cantidad</label>
-                      <input type="number" step="any" placeholder="Ej. 1" value={cantidadGasto} onChange={(e) => setCantidadGasto(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm font-medium focus:outline-none bg-slate-50" />
+                      <input type="number" step="any" placeholder="Ej. 1" value={cantidadGasto} onChange={(e) => setCantidadGasto(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-black font-medium focus:outline-none bg-slate-50" />
                     </div>
                     <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
                       <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Precio Unitario ($)</label>
-                      <input type="number" step="0.01" placeholder="0.00" value={precioUnitarioGasto} onChange={(e) => setPrecioUnitarioGasto(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm font-medium focus:outline-none bg-slate-50" />
+                      <input type="number" step="0.01" placeholder="0.00" value={precioUnitarioGasto} onChange={(e) => setPrecioUnitarioGasto(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-black font-medium focus:outline-none bg-slate-50" />
                     </div>
                   </div>
 
                   <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
                     <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Número de Cotización (Opcional)</label>
-                    <input type="text" placeholder="Ej. COT-OBRA-023" value={numCotizacion} onChange={(e) => setNumCotizacion(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm font-medium focus:outline-none bg-slate-50" />
+                    <input type="text" placeholder="Ej. COT-OBRA-023" value={numCotizacion} onChange={(e) => setNumCotizacion(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-black font-medium focus:outline-none bg-slate-50" />
                   </div>
 
                   <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
                     <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Proveedor de Materiales</label>
-                    <input type="text" placeholder="Nombre o Razón social..." value={proveedorGasto} onChange={(e) => setProveedorGasto(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm font-medium focus:outline-none bg-slate-50" />
+                    <input type="text" placeholder="Nombre o Razón social..." value={proveedorGasto} onChange={(e) => setProveedorGasto(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-black font-medium focus:outline-none bg-slate-50" />
                   </div>
                 </div>
               )}
@@ -1478,11 +1484,11 @@ export default function DashboardPage() {
                   <div className="grid grid-cols-2 gap-4">
                     <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
                       <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">No. Nota</label>
-                      <input type="text" placeholder="Opcional" value={numNota} onChange={(e) => setNumNota(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm font-medium focus:outline-none bg-slate-50" />
+                      <input type="text" placeholder="Opcional" value={numNota} onChange={(e) => setNumNota(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-black font-medium focus:outline-none bg-slate-50" />
                     </div>
                     <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
                       <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Responsable</label>
-                      <input type="text" placeholder="Nombre" value={responsableGasto} onChange={(e) => setResponsableGasto(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm font-medium focus:outline-none bg-slate-50" />
+                      <input type="text" placeholder="Nombre" value={responsableGasto} onChange={(e) => setResponsableGasto(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-black font-medium focus:outline-none bg-slate-50" />
                     </div>
                   </div>
 
@@ -1512,12 +1518,12 @@ export default function DashboardPage() {
                 <div className="space-y-4">
                   <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
                     <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Nombre del Equipo</label>
-                    <input type="text" required placeholder="Ej. Retroexcavadora CAT 320" value={nombreEquipo} onChange={(e) => setNombreEquipo(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm font-medium focus:outline-none bg-slate-50" />
+                    <input type="text" required placeholder="Ej. Retroexcavadora CAT 320" value={nombreEquipo} onChange={(e) => setNombreEquipo(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-black font-medium focus:outline-none bg-slate-50" />
                   </div>
 
                   <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
                     <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Proveedor</label>
-                    <input type="text" placeholder="Ej. Arrendadora del Centro" value={proveedorGasto} onChange={(e) => setProveedorGasto(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm font-medium focus:outline-none bg-slate-50" />
+                    <input type="text" placeholder="Ej. Arrendadora del Centro" value={proveedorGasto} onChange={(e) => setProveedorGasto(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-black font-medium focus:outline-none bg-slate-50" />
                   </div>
 
                   <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3">
@@ -1532,11 +1538,11 @@ export default function DashboardPage() {
                   <div className="grid grid-cols-2 gap-4">
                     <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
                       <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Tarifa por HORA ($)</label>
-                      <input type="number" required placeholder="Ej. 1200" value={precioUnitarioGasto} onChange={(e) => setPrecioUnitarioGasto(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm font-medium focus:outline-none bg-slate-50" />
+                      <input type="number" required placeholder="Ej. 1200" value={precioUnitarioGasto} onChange={(e) => setPrecioUnitarioGasto(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-black font-medium focus:outline-none bg-slate-50" />
                     </div>
                     <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
                       <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Horas Totales</label>
-                      <input type="number" required placeholder="Ej. 10" value={cantidadGasto} onChange={(e) => setCantidadGasto(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm font-medium focus:outline-none bg-slate-50" />
+                      <input type="number" required placeholder="Ej. 10" value={cantidadGasto} onChange={(e) => setCantidadGasto(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-black font-medium focus:outline-none bg-slate-50" />
                     </div>
                   </div>
                 </div>
@@ -1547,33 +1553,33 @@ export default function DashboardPage() {
                 <div className="space-y-4">
                   <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
                     <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Semana de Registro</label>
-                    <input type="text" disabled placeholder="Periodo Semanal Automático" className="w-full rounded-xl border px-3 py-2 text-sm font-medium bg-slate-100 text-slate-500 cursor-not-allowed" />
+                    <input type="text" disabled placeholder="Periodo Semanal Automático" className="w-full rounded-xl border px-3 py-2 text-black font-medium bg-slate-100 text-slate-500 cursor-not-allowed" />
                   </div>
 
                   <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
                     <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Concepto / Actividad</label>
-                    <input type="text" required placeholder="Ej. Cemento Cruz Azul 50kg" value={conceptoGasto} onChange={(e) => setConceptoGasto(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm font-medium focus:outline-none bg-slate-50" />
+                    <input type="text" required placeholder="Ej. Cemento Cruz Azul 50kg" value={conceptoGasto} onChange={(e) => setConceptoGasto(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-black font-medium focus:outline-none bg-slate-50" />
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
                     <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
                       <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Unidad</label>
-                      <input type="text" placeholder="Ej. Bulto" value={unidadGasto} onChange={(e) => setUnidadGasto(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm font-medium focus:outline-none bg-slate-50" />
+                      <input type="text" placeholder="Ej. Bulto" value={unidadGasto} onChange={(e) => setUnidadGasto(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-black font-medium focus:outline-none bg-slate-50" />
                     </div>
                     <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
                       <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">P.U / Mano de Obra $</label>
-                      <input type="number" required placeholder="Ej. 250" value={precioUnitarioGasto} onChange={(e) => setPrecioUnitarioGasto(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm font-medium focus:outline-none bg-slate-50" />
+                      <input type="number" required placeholder="Ej. 250" value={precioUnitarioGasto} onChange={(e) => setPrecioUnitarioGasto(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-black font-medium focus:outline-none bg-slate-50" />
                     </div>
                   </div>
 
                   <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
                     <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Vol. / Cant. (Para esta semana)</label>
-                    <input type="number" required placeholder="Ej. 10" value={cantidadGasto} onChange={(e) => setCantidadGasto(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm font-medium focus:outline-none bg-slate-50" />
+                    <input type="number" required placeholder="Ej. 10" value={cantidadGasto} onChange={(e) => setCantidadGasto(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-black font-medium focus:outline-none bg-slate-50" />
                   </div>
 
                   <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-2">
                     <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider">Encargado / Recibe (Opcional)</label>
-                    <input type="text" placeholder="Nombre del responsable..." value={encargadoRecibeDestajo} onChange={(e) => setEncargadoRecibeDestajo(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm bg-slate-50" />
+                    <input type="text" placeholder="Nombre del responsable..." value={encargadoRecibeDestajo} onChange={(e) => setEncargadoRecibeDestajo(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-black bg-slate-50" />
                     <div className="flex gap-1.5 flex-wrap pt-1">
                       {['Luis', 'Angel'].map((name) => (
                         <button type="button" key={`recibe-${name}`} onClick={() => setEncargadoRecibeDestajo(name)} className={`px-3 py-1 rounded-lg text-xs font-bold border transition-all ${encargadoRecibeDestajo === name ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-white text-slate-500'}`}>{name}</button>
@@ -1583,7 +1589,7 @@ export default function DashboardPage() {
 
                   <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-2">
                     <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider">Solicitado por (Opcional)</label>
-                    <input type="text" placeholder="Quién pide el material..." value={solicitadoPorDestajo} onChange={(e) => setSolicitadoPorDestajo(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm bg-slate-50" />
+                    <input type="text" placeholder="Quién pide el material..." value={solicitadoPorDestajo} onChange={(e) => setSolicitadoPorDestajo(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-black bg-slate-50" />
                     <div className="flex gap-1.5 flex-wrap pt-1">
                       {['Luis', 'Angel'].map((name) => (
                         <button type="button" key={`solicita-${name}`} onClick={() => setSolicitadoPorDestajo(name)} className={`px-3 py-1 rounded-lg text-xs font-bold border transition-all ${solicitadoPorDestajo === name ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-white text-slate-500'}`}>{name}</button>
@@ -1644,7 +1650,7 @@ export default function DashboardPage() {
                   placeholder="Ej. Residencial Palmas"
                   value={newProjectName} 
                   onChange={(e) => setNewProjectName(e.target.value)} 
-                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-slate-50 focus:outline-none focus:border-blue-500 font-medium" 
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-black bg-slate-50 focus:outline-none focus:border-blue-500 font-medium" 
                 />
               </div>
 
@@ -1656,7 +1662,7 @@ export default function DashboardPage() {
                   placeholder="Nombre del inversionista o empresa"
                   value={newProjectCliente} 
                   onChange={(e) => setNewProjectCliente(e.target.value)} 
-                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-slate-50 focus:outline-none focus:border-blue-500 font-medium" 
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-black bg-slate-50 focus:outline-none focus:border-blue-500 font-medium" 
                 />
               </div>
 
@@ -1668,7 +1674,7 @@ export default function DashboardPage() {
                   placeholder="Ej. CONT-2026-001"
                   value={newProjectNumContrato} 
                   onChange={(e) => setNewProjectNumContrato(e.target.value)} 
-                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-slate-50 focus:outline-none focus:border-blue-500 font-medium font-mono" 
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-black bg-slate-50 focus:outline-none focus:border-blue-500 font-medium font-mono" 
                 />
               </div>
 
@@ -1680,7 +1686,7 @@ export default function DashboardPage() {
                   placeholder="Ej. San Pablo del Monte, Tlaxcala"
                   value={newProjectUbicacion} 
                   onChange={(e) => setNewProjectUbicacion(e.target.value)} 
-                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-slate-50 focus:outline-none focus:border-blue-500 font-medium" 
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-black bg-slate-50 focus:outline-none focus:border-blue-500 font-medium" 
                 />
               </div>
 
@@ -1711,7 +1717,7 @@ export default function DashboardPage() {
                   required
                   value={selectedResidentId}
                   onChange={(e) => setSelectedResidentId(e.target.value)}
-                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-slate-50 focus:outline-none focus:border-blue-500 font-medium"
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-black bg-slate-50 focus:outline-none focus:border-blue-500 font-medium"
                 >
                   <option value="">-- Seleccionar Residente --</option>
                   {residents.map((res) => (
