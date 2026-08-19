@@ -9,10 +9,14 @@ import jsPDF from 'jspdf';
 export const dynamic = 'force-dynamic';
 import autoTable from 'jspdf-autotable';
 
+// Icono SVG para la barra de búsqueda de resguardos
 const SearchIcon = () => (
-  <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+  <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+  </svg>
 );
 
+// Interfaz para tipar los resguardos y herramientas en almacén
 interface HerramientaAlmacen {
   id: string;
   codigo: string;
@@ -31,32 +35,22 @@ interface HerramientaAlmacen {
 }
 
 export default function DashboardPage() {
-  // --- ESTADOS DE CONTROL Y REGISTROS ---
-  const [numNota, setNumNota] = useState('');
-  const [responsableGasto, setResponsableGasto] = useState('');
-  const [justificacionCaja, setJustificacionCaja] = useState('');
-  const [nombreEquipo, setNombreEquipo] = useState('');
-  const [modalidadFacturacion, setModalidadFacturacion] = useState('Por Semana');
-  const [tarifaHora, setTarifaHora] = useState('');
-  const [rubroClasificacion, setRubroClasificacion] = useState('Material');
-  const [estadoPago, setEstadoPago] = useState('Liquidado');
-  const [numCotizacion, setNumCotizacion] = useState('');
-  const [encargadoRecibeDestajo, setEncargadoRecibeDestajo] = useState('');
-  const [solicitadoPorDestajo, setSolicitadoPorDestajo] = useState('');
-  const [subTipoCajaChica, setSubTipoCajaChica] = useState<'Inversion' | 'Gasto'>('Gasto');
-  
   const router = useRouter();
-  const [loadingAuth, setLoadingAuth] = useState(true);
+
+  // --- ESTADOS DE AUTENTICACIÓN Y ROLES ---
   const [userRole, setUserRole] = useState<string | null>(null); 
   
+  // --- ESTADOS DE OBRAS Y PROYECTOS ---
   const [projects, setProjects] = useState<any[]>([]);
   const [selectedProject, setSelectedProject] = useState<any | null>(null);
   const [residents, setResidents] = useState<any[]>([]);
   
+  // --- MÉTRICAS Y CONTROL DE ESTADOS DE CARGA ---
   const [metrics, setMetrics] = useState({ gactuar: 0, gastoDirecto: 0, cajaChica: 0, personalActivo: 0 });
   const [loadingMetrics, setLoadingMetrics] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null); 
 
+  // --- REGISTROS DE BASE DE DATOS ---
   const [cajaChicaRecords, setCajaChicaRecords] = useState<any[]>([]);
   const [gastosGeneralesRecords, setGastosGeneralesRecords] = useState<any[]>([]);
   const [workersRecords, setWorkersRecords] = useState<any[]>([]);
@@ -66,44 +60,51 @@ export default function DashboardPage() {
   const [inventoryRecords, setInventoryRecords] = useState<any[]>([]);
   const [maquinariaRecords, setMaquinariaRecords] = useState<any[]>([]); 
 
+  // --- NAVEGACIÓN ENTRE PESTAÑAS ---
   const [activeTab, setActiveTab] = useState<'analisis' | 'caja' | 'personal' | 'bitacora' | 'planos' | 'resguardos'>('analisis');
   const [expenseSubTab, setExpenseSubTab] = useState<'generales' | 'caja_chica' | 'maquinaria' | 'destajos'>('generales'); 
 
+  // --- MODAL DE GASTOS Y SUS CAMPOS ---
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
-  const [isWorkerModalOpen, setIsWorkerModalOpen] = useState(false);
-  const [newWorkerName, setNewWorkerName] = useState('');
-  const [newWorkerRole, setNewWorkerRole] = useState('Peón');
-  const [newWorkerPhone, setNewWorkerPhone] = useState('');
-  const [loadingWorkerForm, setLoadingWorkerForm] = useState(false);
-  const [workerFormError, setWorkerFormError] = useState<string | null>(null);
+  const [loadingExpenseForm, setLoadingExpenseForm] = useState(false);
+  const [expenseFormError, setExpenseFormError] = useState<string | null>(null);
 
-  const [isPlanosModalOpen, setIsPlanosModalOpen] = useState(false);
-  const [planoName, setPlanoName] = useState('');
-  const [planoVersion, setPlanoVersion] = useState('v1.0');
-  const [planoFile, setPlanoFile] = useState<File | null>(null);
-  const [loadingPlano, setLoadingPlano] = useState(false);
-  const [planoError, setPlanoError] = useState<string | null>(null);
-  const [planoCategory, setPlanoCategory] = useState('Planos'); 
-  const [planoFilter, setPlanoFilter] = useState<'Todos' | 'Planos' | 'Permisos' | 'Contratos' | 'Otros'>('Todos'); 
-  
+  const [numNota, setNumNota] = useState('');
+  const [responsableGasto, setResponsableGasto] = useState('');
+  const [justificacionCaja, setJustificacionCaja] = useState('');
+  const [nombreEquipo, setNombreEquipo] = useState('');
+  const [modalidadFacturacion, setModalidadFacturacion] = useState('Por Semana');
+  const [rubroClasificacion, setRubroClasificacion] = useState('Material');
+  const [estadoPago, setEstadoPago] = useState('Liquidado');
+  const [numCotizacion, setNumCotizacion] = useState('');
+  const [encargadoRecibeDestajo, setEncargadoRecibeDestajo] = useState('');
+  const [solicitadoPorDestajo, setSolicitadoPorDestajo] = useState('');
+  const [subTipoCajaChica, setSubTipoCajaChica] = useState<'Inversion' | 'Gasto'>('Gasto');
+
   const [conceptoGasto, setConceptoGasto] = useState('');
   const [unidadGasto, setUnidadGasto] = useState('');
   const [cantidadGasto, setCantidadGasto] = useState('');
   const [precioUnitarioGasto, setPrecioUnitarioGasto] = useState('');
   const [montoGasto, setMontoGasto] = useState('');
-  const [tipoGasto, setTipoGasto] = useState('Destajos y Materiales');
   const [proveedorGasto, setProveedorGasto] = useState('');
   const [fechaGasto, setFechaGasto] = useState(new Date().toISOString().split('T')[0]);
-  
-  const [loadingExpenseForm, setLoadingExpenseForm] = useState(false);
-  const [expenseFormError, setExpenseFormError] = useState<string | null>(null);
 
-  // --- ESTADOS PARA CREACIÓN DE OBRA COMPLETA ---
+  // --- MODAL DE TRABAJADORES ---
+  const [isWorkerModalOpen, setIsWorkerModalOpen] = useState(false);
+  const [newWorkerName, setNewWorkerName] = useState('');
+  const [newWorkerRole, setNewWorkerRole] = useState('Peón');
+  const [newWorkerPhone, setNewWorkerPhone] = useState('');
+  const [loadingWorkerForm, setLoadingWorkerForm] = useState(false);
+
+  // --- DOCUMENTOS Y PLANOS ---
+  const [planoFilter, setPlanoFilter] = useState<'Todos' | 'Planos' | 'Permisos' | 'Contratos' | 'Otros'>('Todos'); 
+
+  // --- CREACIÓN Y EDICIÓN DE OBRAS ---
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectCliente, setNewProjectCliente] = useState('');
   const [newProjectNumContrato, setNewProjectNumContrato] = useState('');
-  const [newProjectUbicacion, setNewProjectUbicacion] = useState(''); // 🟢 Nuevo campo
+  const [newProjectUbicacion, setNewProjectUbicacion] = useState('');
   const [newProjectFechaInicio, setNewProjectFechaInicio] = useState('');
   const [newProjectFechaFin, setNewProjectFechaFin] = useState('');
   const [selectedResidentId, setSelectedResidentId] = useState('');
@@ -111,20 +112,21 @@ export default function DashboardPage() {
   const [projectFormError, setProjectFormError] = useState<string | null>(null);
 
   const [isFinishModalOpen, setIsFinishModalOpen] = useState(false);
-  const [finishingProject, setFinishingProject] = useState(false);
-
   const [isEditingProject, setIsEditingProject] = useState(false);
   const [updatingProject, setUpdatingProject] = useState(false);
   const [editProjectForm, setEditProjectForm] = useState({
     name: '', client_name: '', contract_number: '', start_date: '', end_date: ''
   });
 
+  // --- RESGUARDOS E INVENTARIO ---
   const [herramientas, setHerramientas] = useState<HerramientaAlmacen[]>([]);
   const [searchResguardo, setSearchResguardo] = useState('');
   const [filtroUbicacionResguardo, setFiltroUbicacionResguardo] = useState<'todos' | 'bodega' | 'obra'>('todos');
 
+  // Paleta de colores para gráficos
   const COLORS = useMemo(() => ['#F59E0B', '#3B82F6', '#10B981', '#8B5CF6'], []);
   
+  // Formateadores utilitarios
   const formatCurrency = (amount: number) => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(amount);
   const formatDate = (dateString: string) => {
     if (!dateString) return 'Sin fecha';
@@ -139,6 +141,7 @@ export default function DashboardPage() {
     } catch (e) { return []; }
   };
 
+  // Helper para renderizar los círculos de asistencia de lunes a sábado
   const renderAttendanceDots = (attendanceData: any) => {
     let attArray: boolean[] = [];
     if (typeof attendanceData === 'string') {
@@ -163,6 +166,7 @@ export default function DashboardPage() {
     );
   };
 
+  // Cálculo automático del monto del gasto (cantidad * precio unitario)
   useEffect(() => {
     const cant = parseFloat(cantidadGasto) || 0;
     const precio = parseFloat(precioUnitarioGasto) || 0;
@@ -173,6 +177,12 @@ export default function DashboardPage() {
     }
   }, [cantidadGasto, precioUnitarioGasto]);
 
+  /**
+   * 📌 NOTA: fetchMetricsAndRecords
+   * Consulta a Supabase todas las tablas operativas de la obra seleccionada
+   * (gastos, personal, caja chica, bitácoras, nóminas, destajos, planos y herramientas)
+   * y calcula los subtotales para los paneles de métricas.
+   */
   const fetchMetricsAndRecords = async (projectId: string) => {
     setLoadingMetrics(true);
     try {
@@ -182,7 +192,7 @@ export default function DashboardPage() {
       const { data: workers } = await supabase.from('workers').select('*').eq('project_id', projectId).eq('is_active', true);
       setWorkersRecords(workers || []);
 
-      const { data: caja } = await supabase.from('caja_chica').select('*').eq('project_id', projectId).order('fecha', { ascending: false });
+      const { data: caja } = await supabase.from('caja_chica').select('*').eq('project_id', projectId).eq('is_active', true).order('fecha', { ascending: false });
       setCajaChicaRecords(caja || []);
 
       const { data: logs } = await supabase.from('logs').select('*').eq('project_id', projectId).order('created_at', { ascending: false });
@@ -191,13 +201,13 @@ export default function DashboardPage() {
       const { data: payroll } = await supabase.from('payroll_records').select('*').eq('project_id', projectId).order('created_at', { ascending: false });
       setPayrollRecords(payroll || []);
 
-      const { data: inventory } = await supabase.from('inventory').select('*').eq('project_id', projectId);
+      const { data: inventory } = await supabase.from('inventory').select('*').eq('project_id', projectId).eq('is_active', true);
       setInventoryRecords(inventory || []);
 
       const { data: planos } = await supabase.from('planos').select('*').eq('project_id', projectId).order('created_at', { ascending: false });
       setPlanosRecords(planos || []);
 
-      const { data: maquinaria } = await supabase.from('gastos_maquinaria').select('*').eq('project_id', projectId).order('fecha', { ascending: false });
+      const { data: maquinaria } = await supabase.from('gastos_maquinaria').select('*').eq('project_id', projectId).eq('is_active', true).order('fecha', { ascending: false });
       setMaquinariaRecords(maquinaria || []);
 
       const { data: herramientasData } = await supabase.from('almacen_herramientas').select('*').eq('project_id', projectId).eq('is_active', true).order('created_at', { ascending: false });
@@ -218,6 +228,11 @@ export default function DashboardPage() {
     }
   };
 
+  /**
+   * 📌 NOTA: checkUserAndFetchData
+   * Valida la sesión activa del usuario, obtiene su rol desde 'profiles' y
+   * carga el listado de obras activas disponibles para el menú lateral.
+   */
   useEffect(() => {
     const checkUserAndFetchData = async () => {
       const { data: { session } } = await supabase.auth.getSession();
@@ -237,8 +252,6 @@ export default function DashboardPage() {
 
       const { data: usersList } = await supabase.from('profiles').select('id, full_name').eq('role', 'residente');
       if (usersList) setResidents(usersList);
-
-      setLoadingAuth(false);
     };
     checkUserAndFetchData();
   }, [router]);
@@ -247,18 +260,34 @@ export default function DashboardPage() {
     if (selectedProject) fetchMetricsAndRecords(selectedProject.id);
   }, [selectedProject]);
 
+  // Cálculo consolidado de los rubros para la gráfica circular
   const chartData = useMemo<{ name: string; value: number }[]>(() => {
     const totals = { 'Destajos y Materiales': 0, 'Mano de Obra': 0, 'Caja Chica': 0, 'Gastos Generales': 0 };
 
     if (gastosGeneralesRecords) {
       gastosGeneralesRecords.forEach(record => {
-        const tipo = record.tipo as keyof typeof totals || 'Gastos Generales';
-        totals[tipo !== undefined ? tipo : 'Gastos Generales'] += Number(record.monto) || 0;
+        totals['Destajos y Materiales'] += Number(record.monto) || 0;
       });
     }
 
-    if (cajaChicaRecords) cajaChicaRecords.forEach(record => { totals['Caja Chica'] += Number(record.monto) || 0; });
-    if (payrollRecords) payrollRecords.forEach(record => { totals['Mano de Obra'] += Number(record.final_salary || 0); });
+    if (maquinariaRecords) {
+      maquinariaRecords.forEach(record => {
+        totals['Gastos Generales'] += Number(record.monto) || 0;
+      });
+    }
+
+    if (cajaChicaRecords) {
+      cajaChicaRecords.forEach(record => { 
+        totals['Caja Chica'] += Number(record.monto) || 0; 
+      });
+    }
+
+    if (payrollRecords) {
+      payrollRecords.forEach(record => { 
+        totals['Mano de Obra'] += Number(record.final_salary || 0); 
+      });
+    }
+
     if (inventoryRecords) {
       inventoryRecords.forEach(record => {
         const cantidad = Number(record.quantity || 1);
@@ -268,12 +297,13 @@ export default function DashboardPage() {
     }
 
     return Object.entries(totals).map(([name, value]) => ({ name, value: Number(value) })).sort((a, b) => b.value - a.value);
-  }, [gastosGeneralesRecords, cajaChicaRecords, payrollRecords, inventoryRecords]);
+  }, [gastosGeneralesRecords, maquinariaRecords, cajaChicaRecords, payrollRecords, inventoryRecords]);
 
   const totalConsolidated = useMemo(() => {
     return chartData.reduce((sum, item) => sum + item.value, 0);
   }, [chartData]);
 
+  // Agrupador cronológico semanal de todas las erogaciones de la obra
   const weeklySummaryData = useMemo(() => {
     const weeks: Record<string, { startString: string, gastos: number, caja: number, nomina: number, destajos: number, total: number }> = {};
 
@@ -304,6 +334,7 @@ export default function DashboardPage() {
     };
 
     gastosGeneralesRecords.forEach(r => processRecord(r, 'fecha', Number(r.monto || 0), 'gastos'));
+    maquinariaRecords.forEach(r => processRecord(r, 'fecha', Number(r.monto || 0), 'gastos'));
     cajaChicaRecords.forEach(r => processRecord(r, 'fecha', Number(r.monto || 0), 'caja'));
     payrollRecords.forEach(r => processRecord(r, 'week_start', Number(r.final_salary || 0), 'nomina'));
     inventoryRecords.forEach(r => processRecord(r, 'created_at', Number(r.quantity || 1) * Number(r.unit_price || 0), 'destajos'));
@@ -311,8 +342,9 @@ export default function DashboardPage() {
     return Object.entries(weeks)
       .sort(([keyA], [keyB]) => new Date(keyB).getTime() - new Date(keyA).getTime())
       .map(([_, data]) => data);
-  }, [gastosGeneralesRecords, cajaChicaRecords, payrollRecords, inventoryRecords]);
+  }, [gastosGeneralesRecords, maquinariaRecords, cajaChicaRecords, payrollRecords, inventoryRecords]);
 
+  // Agrupador de listas de raya históricas por semana
   const registrosAgrupadosPorSemana = useMemo(() => {
     const semanas: Record<string, { numeroSemana: string; fechaRepresentativa: Date; registros: any[]; subtotalSemana: number }> = {};
 
@@ -337,6 +369,7 @@ export default function DashboardPage() {
     return Object.values(semanas).sort((a, b) => b.fechaRepresentativa.getTime() - a.fechaRepresentativa.getTime());
   }, [payrollRecords]);
 
+  // Filtro reactivo para herramientas en resguardo
   const filteredHerramientasWeb = useMemo(() => {
     return herramientas.filter((h) => {
       const cumpleBusqueda = h.nombre?.toLowerCase().includes(searchResguardo.toLowerCase()) ||
@@ -351,7 +384,42 @@ export default function DashboardPage() {
     return payrollRecords.reduce((sum, p) => sum + Number(p.final_salary || 0), 0);
   }, [payrollRecords]);
 
-const handleSaveGasto = async (e: React.FormEvent) => {
+  /**
+   * 📌 NOTA: handleEliminarRegistro
+   * Realiza un borrado físico definitivo (Hard Delete) en Supabase para la tabla
+   * y registro indicados, actualizando de inmediato la vista y las métricas.
+   */
+  const handleEliminarRegistro = async (
+    tabla: 'gastos_generales' | 'caja_chica' | 'gastos_maquinaria' | 'inventory' | 'workers' | 'planos' | 'logs',
+    id: string
+  ) => {
+    if (!confirm('¿Deseas eliminar este registro de forma permanente?')) return;
+
+    try {
+      const { error } = await supabase
+        .from(tabla)
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+
+      if (selectedProject) {
+        await fetchMetricsAndRecords(selectedProject.id);
+      }
+    } catch (err: any) {
+      alert('Error al eliminar: ' + err.message);
+    }
+  };
+
+  /**
+   * 📌 NOTA: handleSaveGasto
+   * Inserta un nuevo movimiento financiero en Supabase dependiendo de la subpestaña activa:
+   * 'generales' -> gastos_generales
+   * 'caja_chica' -> caja_chica
+   * 'maquinaria' -> gastos_maquinaria
+   * 'destajos'   -> inventory
+   */
+  const handleSaveGasto = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedProject) return;
     setLoadingExpenseForm(true); 
@@ -369,7 +437,7 @@ const handleSaveGasto = async (e: React.FormEvent) => {
             cantidad: cantidadGasto ? parseFloat(cantidadGasto) : null,
             precio_unitario: precioUnitarioGasto ? parseFloat(precioUnitarioGasto) : null,
             monto: parseFloat(montoGasto),
-            categoria: rubroClasificacion || 'General', // 🟢 Mapeado a la columna real 'categoria'
+            categoria: rubroClasificacion || 'General',
             proveedor: proveedorGasto || null,
             fecha: fechaGasto ? new Date(fechaGasto).toISOString() : new Date().toISOString(),
             is_active: true,
@@ -402,7 +470,7 @@ const handleSaveGasto = async (e: React.FormEvent) => {
           const resMaq = await supabase.from('gastos_maquinaria').insert([{
             project_id: selectedProject.id,
             equipo: nombreEquipo || conceptoGasto,
-            concepto: conceptoGasto || nombreEquipo || 'Renta de Maquinaria', // 🟢 Campo NOT NULL obligatorio
+            concepto: conceptoGasto || nombreEquipo || 'Renta de Maquinaria',
             proveedor: proveedorGasto || null,
             fecha: fechaGasto ? new Date(fechaGasto).toISOString() : new Date().toISOString(),
             monto: parseFloat(montoGasto),
@@ -433,7 +501,6 @@ const handleSaveGasto = async (e: React.FormEvent) => {
 
       if (error) throw error;
 
-      // Limpieza de campos tras inserción exitosa
       setConceptoGasto(''); setUnidadGasto(''); setCantidadGasto(''); setPrecioUnitarioGasto(''); 
       setMontoGasto(''); setProveedorGasto(''); setNumNota(''); setResponsableGasto(''); setJustificacionCaja('');
       setNombreEquipo(''); setNumCotizacion(''); setEncargadoRecibeDestajo(''); setSolicitadoPorDestajo('');
@@ -448,30 +515,42 @@ const handleSaveGasto = async (e: React.FormEvent) => {
     }
   };
 
+  /**
+   * 📌 NOTA: handleCreateWorker
+   * Registra a un nuevo trabajador en la nómina (tabla 'workers') asignándolo a la obra.
+   */
   const handleCreateWorker = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedProject || userRole !== 'admin') return; 
-    setLoadingWorkerForm(true); setWorkerFormError(null);
+    setLoadingWorkerForm(true);
     try {
       const { error } = await supabase.from('workers').insert([{ project_id: selectedProject.id, name_worker: newWorkerName, role: newWorkerRole, phone: newWorkerPhone || null, is_active: true }]);
       if (error) throw error;
       setNewWorkerName(''); setNewWorkerRole('Peón'); setNewWorkerPhone(''); setIsWorkerModalOpen(false);
       await fetchMetricsAndRecords(selectedProject.id);
-    } catch (error: any) { setWorkerFormError(error.message); } finally { setLoadingWorkerForm(false); }
+    } catch (error: any) { 
+      alert(error.message);
+    } finally { 
+      setLoadingWorkerForm(false); 
+    }
   };
 
- const handleCreateProject = async (e: React.FormEvent) => {
+  /**
+   * 📌 NOTA: handleCreateProject
+   * Da de alta una nueva obra en 'projects' y vincula de inmediato al residente
+   * encargado en 'project_members' para sincronización con la app móvil.
+   */
+  const handleCreateProject = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoadingProjectForm(true); 
     setProjectFormError(null);
     try {
-      // 🟢 Mandamos todos los datos estructurados a Supabase
       const { data, error } = await supabase.from('projects').insert([
         { 
           name: newProjectName, 
           client_name: newProjectCliente, 
           contract_number: newProjectNumContrato,
-          ubicacion: newProjectUbicacion, // ⚠️ Columna en tu base de datos
+          ubicacion: newProjectUbicacion,
           start_date: newProjectFechaInicio || null, 
           end_date: newProjectFechaFin || null
         } as any
@@ -482,14 +561,12 @@ const handleSaveGasto = async (e: React.FormEvent) => {
       if (data && data.length > 0) {
         const createdProject = data[0];
         
-        // 🟢 Vinculamos al residente para que el APK tenga permisos inmediatos
         if (selectedResidentId) {
           await supabase.from('project_members').insert([
             { project_id: createdProject.id, user_id: selectedResidentId, role: 'residente' }
           ]);
         }
 
-        // Limpiamos todos los estados
         setNewProjectName(''); 
         setNewProjectCliente(''); 
         setNewProjectNumContrato('');
@@ -510,32 +587,10 @@ const handleSaveGasto = async (e: React.FormEvent) => {
     }
   };
 
-  const handleUploadPlano = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedProject || !planoFile) return;
-    setLoadingPlano(true); setPlanoError(null);
-    try {
-      const fileExt = planoFile.name.split('.').pop();
-      const fileName = `${selectedProject.id}_${Date.now()}.${fileExt}`;
-      const filePath = `planos_obra/${fileName}`;
-      const { error: uploadError } = await supabase.storage.from('planos').upload(filePath, planoFile);
-      if (uploadError) throw uploadError;
-      const { data: publicUrlData } = supabase.storage.from('planos').getPublicUrl(filePath);
-      
-      const { error: dbError } = await supabase.from('planos').insert([{ 
-        project_id: selectedProject.id, 
-        name: planoName, 
-        version: planoVersion, 
-        categoria: planoCategory, 
-        file_url: publicUrlData.publicUrl 
-      }]);
-      
-      if (dbError) throw dbError;
-      setPlanoName(''); setPlanoVersion('v1.0'); setPlanoCategory('Planos'); setPlanoFile(null); setIsPlanosModalOpen(false);
-      await fetchMetricsAndRecords(selectedProject.id);
-    } catch (error: any) { setPlanoError("Error al subir plano: " + error.message); } finally { setLoadingPlano(false); }
-  };
-
+  /**
+   * 📌 NOTA: handleExportBitacoraCSV
+   * Exporta en formato CSV descargable los registros de la bitácora de obra.
+   */
   const handleExportBitacoraCSV = () => {
     if (bitacoraRecords.length === 0) return;
     const headers = ['Fecha', 'Categoria', 'Descripcion'];
@@ -547,6 +602,10 @@ const handleSaveGasto = async (e: React.FormEvent) => {
     document.body.appendChild(link); link.click(); document.body.removeChild(link);
   };
 
+  /**
+   * 📌 NOTA: handleExportBitacoraPDF
+   * Genera una vista imprimible de la bitácora con fotografías y abre el diálogo de impresión.
+   */
   const handleExportBitacoraPDF = () => {
     if (bitacoraRecords.length === 0) return;
     let rowsHtml = ''; const projectName = selectedProject?.name || 'Obra sin nombre';
@@ -567,10 +626,14 @@ const handleSaveGasto = async (e: React.FormEvent) => {
     setTimeout(() => { if (document.body.contains(iframe)) document.body.removeChild(iframe); }, 10000);
   };
 
+  /**
+   * 📌 NOTA: handleExportGastosCSV
+   * Descarga en archivo Excel/CSV el listado completo de gastos generales registrados.
+   */
   const handleExportGastosCSV = () => {
     if (gastosGeneralesRecords.length === 0) return;
     const headers = ['Fecha', 'Concepto', 'Clasificación', 'Proveedor', 'Cantidad', 'Unidad', 'P. Unitario', 'Importe ($MXN)'];
-    const rows = gastosGeneralesRecords.map(r => [formatDate(r.fecha).split(',')[0], `"${(r.concepto || '').replace(/"/g, '""')}"`, r.tipo || 'Gastos Generales', `"${(r.proveedor || 'S/P').replace(/"/g, '""')}"`, r.cantidad || 0, r.unidad || 'N/A', r.precio_unitario || 0, r.monto]);
+    const rows = gastosGeneralesRecords.map(r => [formatDate(r.fecha).split(',')[0], `"${(r.concepto || '').replace(/"/g, '""')}"`, r.categoria || 'General', `"${(r.proveedor || 'S/P').replace(/"/g, '""')}"`, r.cantidad || 0, r.unidad || 'N/A', r.precio_unitario || 0, r.monto]);
     const csvContent = [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
     const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -578,10 +641,14 @@ const handleSaveGasto = async (e: React.FormEvent) => {
     document.body.appendChild(link); link.click(); document.body.removeChild(link);
   };
 
+  /**
+   * 📌 NOTA: handleExportGastosPDF
+   * Genera el estado analítico financiero de gastos en formato de impresión PDF.
+   */
   const handleExportGastosPDF = () => {
     if (totalConsolidated === 0) return;
     let breakdownHtml = ''; chartData.forEach((item, idx) => { const percentage = totalConsolidated > 0 ? ((item.value / totalConsolidated) * 100).toFixed(1) : '0'; breakdownHtml += `<tr><td><span style="display:inline-block; width:10px; height:10px; border-radius:50%; background-color:${COLORS[idx % COLORS.length]}; margin-right:8px;"></span>${item.name}</td><td style="text-align: right; font-weight: bold;">${formatCurrency(item.value)}</td><td style="text-align: right; color: #64748B;">${percentage}%</td></tr>`; });
-    let rowsHtml = ''; gastosGeneralesRecords.forEach(r => { rowsHtml += `<tr><td>${formatDate(r.fecha).split(',')[0]}</td><td style="font-weight: 500;">${r.concepto}</td><td>${r.tipo || 'Gastos Generales'}</td><td>${r.proveedor || 'S/P'}</td><td style="text-align: right;">${r.cantidad || '-'} ${r.unidad || ''}</td><td style="text-align: right;">${r.precio_unitario ? formatCurrency(r.precio_unitario) : '-'}</td><td style="text-align: right; color: #EF4444; font-weight: bold;">-${formatCurrency(r.monto)}</td></tr>`; });
+    let rowsHtml = ''; gastosGeneralesRecords.forEach(r => { rowsHtml += `<tr><td>${formatDate(r.fecha).split(',')[0]}</td><td style="font-weight: 500;">${r.concepto}</td><td>${r.categoria || 'General'}</td><td>${r.proveedor || 'S/P'}</td><td style="text-align: right;">${r.cantidad || '-'} ${r.unidad || ''}</td><td style="text-align: right;">${r.precio_unitario ? formatCurrency(r.precio_unitario) : '-'}</td><td style="text-align: right; color: #EF4444; font-weight: bold;">-${formatCurrency(r.monto)}</td></tr>`; });
     const htmlContent = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Reporte Financiero</title><style>body{font-family:sans-serif;padding:40px;}table{width:100%;border-collapse:collapse;margin-bottom:20px;font-size:12px;}th,td{padding:8px;border-bottom:1px solid #eee;text-align:left;}</style></head><body><h2>Estado Analítico de Gastos</h2><h3>Total Directo: ${formatCurrency(totalConsolidated)}</h3><table><thead><tr><th>Clasificación</th><th style="text-align:right;">Monto</th><th style="text-align:right;">%</th></tr></thead><tbody>${breakdownHtml}</tbody></table><br><table><thead><tr><th>Fecha</th><th>Concepto</th><th>Clasif.</th><th>Proveedor</th><th style="text-align:right;">Cant.</th><th style="text-align:right;">P.U.</th><th style="text-align:right;">Importe</th></tr></thead><tbody>${rowsHtml}</tbody></table><script>setTimeout(()=>{window.print();},500);</script></body></html>`;
     const iframe = document.createElement('iframe'); iframe.style.position = 'absolute'; iframe.style.width = '0px'; iframe.style.height = '0px'; iframe.style.border = 'none';
     document.body.appendChild(iframe); const iframeDoc = iframe.contentWindow?.document;
@@ -589,6 +656,10 @@ const handleSaveGasto = async (e: React.FormEvent) => {
     setTimeout(() => { if (document.body.contains(iframe)) document.body.removeChild(iframe); }, 10000);
   };
 
+  /**
+   * 📌 NOTA: handleExportWorkersCSV
+   * Exporta la lista de raya (nómina de trabajadores) en formato CSV con asistencia y deducciones.
+   */
   const handleExportWorkersCSV = () => {
     if (workersRecords.length === 0) return;
     const headers = ['Trabajador', 'Puesto', 'Sueldo Base Semanal ($)', 'Dias Asistidos', 'Faltas', 'Descuento Aplicado ($)', 'Motivo/Nota', 'Total a Pagar ($)'];
@@ -612,6 +683,10 @@ const handleSaveGasto = async (e: React.FormEvent) => {
     document.body.appendChild(link); link.click(); document.body.removeChild(link);
   };
 
+  /**
+   * 📌 NOTA: handleExportWorkersPDF
+   * Genera el formato de firma de raya semanal en PDF para su impresión en campo.
+   */
   const handleExportWorkersPDF = () => {
     if (workersRecords.length === 0) return;
     const projectName = selectedProject?.name || 'Obra sin nombre';
@@ -642,6 +717,10 @@ const handleSaveGasto = async (e: React.FormEvent) => {
     setTimeout(() => { if (document.body.contains(iframe)) document.body.removeChild(iframe); }, 10000);
   };
 
+  /**
+   * 📌 NOTA: startEditingProject
+   * Carga los datos de la obra actual en los inputs del formulario de edición.
+   */
   const startEditingProject = () => {
     setEditProjectForm({
       name: selectedProject?.name || '',
@@ -653,6 +732,10 @@ const handleSaveGasto = async (e: React.FormEvent) => {
     setIsEditingProject(true);
   };
 
+  /**
+   * 📌 NOTA: handleUpdateProject
+   * Actualiza en Supabase los campos básicos de la obra (nombre, cliente, contrato y fechas).
+   */
   const handleUpdateProject = async () => {
     if (!selectedProject) return;
     setUpdatingProject(true);
@@ -683,6 +766,11 @@ const handleSaveGasto = async (e: React.FormEvent) => {
     }
   };
 
+  /**
+   * 📌 NOTA: generarReporteMaestroPDF
+   * Crea un documento PDF con el acta de finiquito y balance de costos usando jsPDF,
+   * y lo sube automáticamente al bucket de storage 'reportes_cierre'.
+   */
   const generarReporteMaestroPDF = async (montoTotal: number): Promise<string | null> => {
     try {
       const projectName = selectedProject?.name || 'Obra sin nombre';
@@ -737,9 +825,12 @@ const handleSaveGasto = async (e: React.FormEvent) => {
     }
   };
 
+  /**
+   * 📌 NOTA: handleFinalizarObra
+   * Cambia el estatus de la obra a 'finalizada' en Supabase y le adjunta el PDF de cierre.
+   */
   const handleFinalizarObra = async () => {
     if (!selectedProject) return;
-    setFinishingProject(true);
     try {
       const pdfUrl = await generarReporteMaestroPDF(totalConsolidated);
       if (!pdfUrl) throw new Error('El Storage de Supabase no devolvió una URL válida.');
@@ -754,11 +845,14 @@ const handleSaveGasto = async (e: React.FormEvent) => {
       alert('¡Obra finalizada exitosamente!');
     } catch (error: any) {
       alert('Error crítico al finalizar la obra: ' + error.message);
-    } finally {
-      setFinishingProject(false);
     }
   };
 
+  /**
+   * 📌 NOTA: ejecutarExportacionPDFWeb
+   * Imprime la carta responsiva individual de resguardo de herramienta
+   * con las firmas digitales de entrega y recepción.
+   */
   const ejecutarExportacionPDFWeb = (tool: HerramientaAlmacen) => {
     const fechaPrestamo = new Date(tool.fecha_entrega || new Date()).toLocaleDateString('es-MX', { 
       weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' 
@@ -904,7 +998,7 @@ const handleSaveGasto = async (e: React.FormEvent) => {
           </div>
 
           <div className="p-6 pt-4 border-t border-slate-800">
-            <button onClick={() => supabase.auth.signOut().then(() => router.push('/login'))} className="w-full flex items-center gap-3 text-red-400/80 hover:text-red-400 text-xs font-bold uppercase tracking-widest transition-colors">
+            <button onClick={() => supabase.auth.signOut().then(() => router.push('/login'))} className="w-full flex items-center gap-3 text-red-400/80 hover:text-red-400 text-xs font-bold uppercase tracking-widest transition-colors cursor-pointer">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>Cerrar Sesión
             </button>
           </div>
@@ -930,7 +1024,7 @@ const handleSaveGasto = async (e: React.FormEvent) => {
               <button 
                 onClick={() => fetchMetricsAndRecords(selectedProject.id)} 
                 disabled={loadingMetrics}
-                className="flex items-center gap-2 bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900 text-xs font-bold px-4 py-2 rounded-lg transition-colors disabled:opacity-50 border border-slate-200"
+                className="flex items-center gap-2 bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900 text-xs font-bold px-4 py-2 rounded-lg transition-colors disabled:opacity-50 border border-slate-200 cursor-pointer"
               >
                 <svg className={`w-4 h-4 ${loadingMetrics ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
                 {loadingMetrics ? 'Actualizando...' : 'Actualizar App'}
@@ -943,7 +1037,7 @@ const handleSaveGasto = async (e: React.FormEvent) => {
           {selectedProject ? (
             <div className="max-w-7xl mx-auto space-y-8">
               
-              {/* TARJETA DE INFO DEL PROYECTO */}
+              {/* TARJETA DE INFORMACIÓN DE LA OBRA */}
               <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 relative transition-all">
                 {userRole === 'admin' && !isEditingProject && (
                   <div className="absolute top-4 right-4 flex gap-2 z-10">
@@ -993,12 +1087,12 @@ const handleSaveGasto = async (e: React.FormEvent) => {
               {/* CONTENEDOR DE PESTAÑAS */}
               <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                 <div className="border-b border-slate-200 bg-slate-50/50 px-6 flex gap-2 overflow-x-auto">
-                  <button onClick={() => setActiveTab('analisis')} className={`px-4 py-4 text-sm font-bold border-b-2 whitespace-nowrap transition-all ${activeTab === 'analisis' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>📊 Análisis Semanal</button>
-                  <button onClick={() => setActiveTab('caja')} className={`px-4 py-4 text-sm font-bold border-b-2 whitespace-nowrap transition-all ${activeTab === 'caja' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'}`}> 💰 Gastos de Obra</button>
-                  <button onClick={() => setActiveTab('personal')} className={`px-4 py-4 text-sm font-bold border-b-2 whitespace-nowrap transition-all ${activeTab === 'personal' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>👷‍♂️ Asistencia ({workersRecords.length})</button>
-                  <button onClick={() => setActiveTab('resguardos')} className={`px-4 py-4 text-sm font-bold border-b-2 whitespace-nowrap transition-all ${activeTab === 'resguardos' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>🔒 Resguardos e Inventario ({herramientas.length})</button>
-                  <button onClick={() => setActiveTab('bitacora')} className={`px-4 py-4 text-sm font-bold border-b-2 whitespace-nowrap transition-all ${activeTab === 'bitacora' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>📖 Bitácora ({bitacoraRecords.length})</button>
-                  <button onClick={() => setActiveTab('planos')} className={`px-4 py-4 text-sm font-bold border-b-2 whitespace-nowrap transition-all ${activeTab === 'planos' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'}`}> 📐 Documentos ({planosRecords.length})</button>
+                  <button onClick={() => setActiveTab('analisis')} className={`px-4 py-4 text-sm font-bold border-b-2 whitespace-nowrap transition-all cursor-pointer ${activeTab === 'analisis' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>📊 Análisis Semanal</button>
+                  <button onClick={() => setActiveTab('caja')} className={`px-4 py-4 text-sm font-bold border-b-2 whitespace-nowrap transition-all cursor-pointer ${activeTab === 'caja' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'}`}> 💰 Gastos de Obra</button>
+                  <button onClick={() => setActiveTab('personal')} className={`px-4 py-4 text-sm font-bold border-b-2 whitespace-nowrap transition-all cursor-pointer ${activeTab === 'personal' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>👷‍♂️ Asistencia ({workersRecords.length})</button>
+                  <button onClick={() => setActiveTab('resguardos')} className={`px-4 py-4 text-sm font-bold border-b-2 whitespace-nowrap transition-all cursor-pointer ${activeTab === 'resguardos' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>🔒 Resguardos e Inventario ({herramientas.length})</button>
+                  <button onClick={() => setActiveTab('bitacora')} className={`px-4 py-4 text-sm font-bold border-b-2 whitespace-nowrap transition-all cursor-pointer ${activeTab === 'bitacora' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>📖 Bitácora ({bitacoraRecords.length})</button>
+                  <button onClick={() => setActiveTab('planos')} className={`px-4 py-4 text-sm font-bold border-b-2 whitespace-nowrap transition-all cursor-pointer ${activeTab === 'planos' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'}`}> 📐 Documentos ({planosRecords.length})</button>
                 </div>
 
                 <div className="overflow-x-auto">
@@ -1008,8 +1102,8 @@ const handleSaveGasto = async (e: React.FormEvent) => {
                       <div className="flex justify-between items-center bg-white">
                         <p className="text-sm text-slate-500">Monitoreo analítico global consolidado y resumen semanal.</p>
                         <div className="flex gap-2">
-                          <button onClick={handleExportGastosCSV} disabled={gastosGeneralesRecords.length === 0} className="bg-slate-100 border border-slate-200 text-slate-700 px-4 py-2 rounded-xl text-sm font-bold">Exportar Excel</button>
-                          <button onClick={handleExportGastosPDF} disabled={totalConsolidated === 0} className="bg-slate-900 text-white px-4 py-2 rounded-xl text-sm font-bold">Imprimir PDF</button>
+                          <button onClick={handleExportGastosCSV} disabled={gastosGeneralesRecords.length === 0} className="bg-slate-100 border border-slate-200 text-slate-700 px-4 py-2 rounded-xl text-sm font-bold cursor-pointer">Exportar Excel</button>
+                          <button onClick={handleExportGastosPDF} disabled={totalConsolidated === 0} className="bg-slate-900 text-white px-4 py-2 rounded-xl text-sm font-bold cursor-pointer">Imprimir PDF</button>
                         </div>
                       </div>
 
@@ -1078,20 +1172,27 @@ const handleSaveGasto = async (e: React.FormEvent) => {
                     <div className="flex flex-col">
                       <div className="px-8 py-4 border-b border-slate-200 bg-slate-50 flex gap-3 overflow-x-auto items-center justify-between">
                         <div className="flex gap-2">
-                          <button onClick={() => setExpenseSubTab('generales')} className={`px-4 py-2 rounded-full text-xs font-bold border ${expenseSubTab === 'generales' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-slate-600'}`}>🧱 Materiales</button>
-                          <button onClick={() => setExpenseSubTab('caja_chica')} className={`px-4 py-2 rounded-full text-xs font-bold border ${expenseSubTab === 'caja_chica' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-slate-600'}`}>💵 Caja Chica</button>
-                          <button onClick={() => setExpenseSubTab('maquinaria')} className={`px-4 py-2 rounded-full text-xs font-bold border ${expenseSubTab === 'maquinaria' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-slate-600'}`}>🚜 Maquinaria</button>
-                          <button onClick={() => setExpenseSubTab('destajos')} className={`px-4 py-2 rounded-full text-xs font-bold border ${expenseSubTab === 'destajos' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-slate-600'}`}>🛠️ Destajos</button>
+                          <button onClick={() => setExpenseSubTab('generales')} className={`px-4 py-2 rounded-full text-xs font-bold border transition-all cursor-pointer ${expenseSubTab === 'generales' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-slate-600'}`}>🧱 Materiales</button>
+                          <button onClick={() => setExpenseSubTab('caja_chica')} className={`px-4 py-2 rounded-full text-xs font-bold border transition-all cursor-pointer ${expenseSubTab === 'caja_chica' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-slate-600'}`}>💵 Caja Chica</button>
+                          <button onClick={() => setExpenseSubTab('maquinaria')} className={`px-4 py-2 rounded-full text-xs font-bold border transition-all cursor-pointer ${expenseSubTab === 'maquinaria' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-slate-600'}`}>🚜 Maquinaria</button>
+                          <button onClick={() => setExpenseSubTab('destajos')} className={`px-4 py-2 rounded-full text-xs font-bold border transition-all cursor-pointer ${expenseSubTab === 'destajos' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-slate-600'}`}>🛠️ Destajos</button>
                         </div>
                         {(userRole === 'admin' || userRole === 'oficina') && (
-                          <button onClick={() => setIsExpenseModalOpen(true)} className="bg-blue-600 text-white text-xs font-bold px-4 py-2 rounded-xl shadow-sm">+ Registrar</button>
+                          <button onClick={() => setIsExpenseModalOpen(true)} className="bg-blue-600 text-white text-xs font-bold px-4 py-2 rounded-xl shadow-sm cursor-pointer">+ Registrar</button>
                         )}
                       </div>
 
+                      {/* TABLA: MATERIALES */}
                       {expenseSubTab === 'generales' && (
                         <table className="w-full text-left text-sm">
                           <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
-                            <tr><th className="px-6 py-4">Fecha</th><th className="px-6 py-4">Concepto</th><th className="px-6 py-4">Proveedor</th><th className="px-6 py-4 text-right">Importe</th></tr>
+                            <tr>
+                              <th className="px-6 py-4">Fecha</th>
+                              <th className="px-6 py-4">Concepto</th>
+                              <th className="px-6 py-4">Proveedor</th>
+                              <th className="px-6 py-4 text-right">Importe</th>
+                              <th className="px-6 py-4 text-center">Acciones</th>
+                            </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100 bg-white">
                             {gastosGeneralesRecords.map(r => (
@@ -1100,16 +1201,32 @@ const handleSaveGasto = async (e: React.FormEvent) => {
                                 <td className="px-6 py-4 text-slate-900 font-medium">{r.concepto}</td>
                                 <td className="px-6 py-4 text-slate-700">{r.proveedor || 'S/P'}</td>
                                 <td className="px-6 py-4 text-red-600 font-bold text-right">-{formatCurrency(r.monto)}</td>
+                                <td className="px-6 py-4 text-center">
+                                  <button 
+                                    onClick={() => handleEliminarRegistro('gastos_generales', r.id)}
+                                    className="text-red-500 hover:text-red-700 hover:bg-red-50 p-1.5 rounded-lg transition-colors cursor-pointer text-xs font-bold"
+                                    title="Eliminar de forma permanente"
+                                  >
+                                    🗑️
+                                  </button>
+                                </td>
                               </tr>
                             ))}
                           </tbody>
                         </table>
                       )}
 
+                      {/* TABLA: CAJA CHICA */}
                       {expenseSubTab === 'caja_chica' && (
                         <table className="w-full text-left text-sm">
                           <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
-                            <tr><th className="px-6 py-4">Fecha</th><th className="px-6 py-4">Responsable</th><th className="px-6 py-4">Concepto</th><th className="px-6 py-4 text-right">Monto</th></tr>
+                            <tr>
+                              <th className="px-6 py-4">Fecha</th>
+                              <th className="px-6 py-4">Responsable</th>
+                              <th className="px-6 py-4">Concepto</th>
+                              <th className="px-6 py-4 text-right">Monto</th>
+                              <th className="px-6 py-4 text-center">Acciones</th>
+                            </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100 bg-white">
                             {cajaChicaRecords.map(r => (
@@ -1118,16 +1235,32 @@ const handleSaveGasto = async (e: React.FormEvent) => {
                                 <td className="px-6 py-4 font-medium text-slate-900">{r.encargado}</td>
                                 <td className="px-6 py-4 text-slate-700">{r.concepto || 'Gastos menores'}</td>
                                 <td className="px-6 py-4 text-red-600 font-bold text-right">-{formatCurrency(r.monto)}</td>
+                                <td className="px-6 py-4 text-center">
+                                  <button 
+                                    onClick={() => handleEliminarRegistro('caja_chica', r.id)}
+                                    className="text-red-500 hover:text-red-700 hover:bg-red-50 p-1.5 rounded-lg transition-colors cursor-pointer text-xs font-bold"
+                                    title="Eliminar de forma permanente"
+                                  >
+                                    🗑️
+                                  </button>
+                                </td>
                               </tr>
                             ))}
                           </tbody>
                         </table>
                       )}
 
+                      {/* TABLA: MAQUINARIA */}
                       {expenseSubTab === 'maquinaria' && (
                         <table className="w-full text-left text-sm">
                           <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
-                            <tr><th className="px-6 py-4">Fecha</th><th className="px-6 py-4">Equipo</th><th className="px-6 py-4">Proveedor</th><th className="px-6 py-4 text-right">Importe</th></tr>
+                            <tr>
+                              <th className="px-6 py-4">Fecha</th>
+                              <th className="px-6 py-4">Equipo</th>
+                              <th className="px-6 py-4">Proveedor</th>
+                              <th className="px-6 py-4 text-right">Importe</th>
+                              <th className="px-6 py-4 text-center">Acciones</th>
+                            </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100 bg-white">
                             {maquinariaRecords.map(r => (
@@ -1136,12 +1269,22 @@ const handleSaveGasto = async (e: React.FormEvent) => {
                                 <td className="px-6 py-4 text-slate-900 font-medium">{r.equipo} {r.asistencia_dias && `(${r.asistencia_dias} hrs)`}</td>
                                 <td className="px-6 py-4 text-slate-700">{r.proveedor || 'S/P'}</td>
                                 <td className="px-6 py-4 text-red-600 font-bold text-right">-{formatCurrency(r.monto)}</td>
+                                <td className="px-6 py-4 text-center">
+                                  <button 
+                                    onClick={() => handleEliminarRegistro('gastos_maquinaria', r.id)}
+                                    className="text-red-500 hover:text-red-700 hover:bg-red-50 p-1.5 rounded-lg transition-colors cursor-pointer text-xs font-bold"
+                                    title="Eliminar de forma permanente"
+                                  >
+                                    🗑️
+                                  </button>
+                                </td>
                               </tr>
                             ))}
                           </tbody>
                         </table>
                       )}
 
+                      {/* TABLA: DESTAJOS */}
                       {expenseSubTab === 'destajos' && (
                         <table className="w-full text-left text-sm">
                           <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
@@ -1152,6 +1295,7 @@ const handleSaveGasto = async (e: React.FormEvent) => {
                               <th className="px-6 py-4">Solicitado Por</th>
                               <th className="px-6 py-4 text-right">Cantidad</th>
                               <th className="px-6 py-4 text-right">Total</th>
+                              <th className="px-6 py-4 text-center">Acciones</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100 bg-white">
@@ -1175,6 +1319,15 @@ const handleSaveGasto = async (e: React.FormEvent) => {
                                 </td>
                                 <td className="px-6 py-4 text-right">{r.quantity} {r.unit || ''}</td>
                                 <td className="px-6 py-4 font-bold text-red-600 text-right">-{formatCurrency(Number(r.quantity || 0) * Number(r.unit_price || 0))}</td>
+                                <td className="px-6 py-4 text-center">
+                                  <button 
+                                    onClick={() => handleEliminarRegistro('inventory', r.id)}
+                                    className="text-red-500 hover:text-red-700 hover:bg-red-50 p-1.5 rounded-lg transition-colors cursor-pointer text-xs font-bold"
+                                    title="Eliminar de forma permanente"
+                                  >
+                                    🗑️
+                                  </button>
+                                </td>
                               </tr>
                             ))}
                           </tbody>
@@ -1202,8 +1355,8 @@ const handleSaveGasto = async (e: React.FormEvent) => {
                             <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
                               <div><h3 className="text-sm font-bold text-slate-800">Historial Agrupado por Semanas</h3><p className="text-xs text-slate-500 mt-0.5">Haz clic en cualquier bloque para abrir el desglose.</p></div>
                               <div className="flex gap-2">
-                                <button onClick={handleExportWorkersCSV} disabled={workersRecords.length === 0} className="bg-slate-100 text-slate-700 px-3 py-1.5 rounded-xl text-xs font-bold border border-slate-200">Exportar Raya</button>
-                                <button onClick={handleExportWorkersPDF} disabled={workersRecords.length === 0} className="bg-slate-900 text-white px-3 py-1.5 rounded-xl text-xs font-bold">Imprimir PDF</button>
+                                <button onClick={handleExportWorkersCSV} disabled={workersRecords.length === 0} className="bg-slate-100 text-slate-700 px-3 py-1.5 rounded-xl text-xs font-bold border border-slate-200 cursor-pointer">Exportar Raya</button>
+                                <button onClick={handleExportWorkersPDF} disabled={workersRecords.length === 0} className="bg-slate-900 text-white px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer">Imprimir PDF</button>
                               </div>
                             </div>
 
@@ -1260,14 +1413,28 @@ const handleSaveGasto = async (e: React.FormEvent) => {
                         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
                           <div className="px-6 py-4 border-b border-slate-100 bg-white flex justify-between items-center">
                             <div><h3 className="text-sm font-bold text-slate-800">Plantilla Oficial</h3><p className="text-[11px] text-slate-400 mt-0.5">Personal activo asignado.</p></div>
-                            {userRole === 'admin' && (<button onClick={() => setIsWorkerModalOpen(true)} className="bg-blue-600 text-white text-[11px] font-black px-3 py-1.5 rounded-xl hover:bg-blue-700 shadow-sm uppercase tracking-wider">+ Alta</button>)}
+                            {userRole === 'admin' && (<button onClick={() => setIsWorkerModalOpen(true)} className="bg-blue-600 text-white text-[11px] font-black px-3 py-1.5 rounded-xl hover:bg-blue-700 shadow-sm uppercase tracking-wider cursor-pointer">+ Alta</button>)}
                           </div>
                           
                           <div className="divide-y divide-slate-100 overflow-y-auto max-h-[500px]">
                             {workersRecords.map((w) => (
                               <div key={w.id} className="p-4 hover:bg-slate-50 transition-colors flex justify-between items-center text-xs">
                                 <div><span className="font-bold text-slate-800 block text-sm">{w.name_worker || w.name}</span><span className="text-slate-500 font-semibold uppercase text-[10px] block mt-0.5">{w.role}</span></div>
-                                <div className="text-right"><span className="font-mono font-black text-slate-900 block">{formatCurrency(w.weekly_salary || 0)}</span><span className="text-[9px] text-slate-400 block mt-0.5 uppercase tracking-wide">Base Semanal</span></div>
+                                <div className="text-right flex items-center gap-3">
+                                  <div>
+                                    <span className="font-mono font-black text-slate-900 block">{formatCurrency(w.weekly_salary || 0)}</span>
+                                    <span className="text-[9px] text-slate-400 block mt-0.5 uppercase tracking-wide">Base Semanal</span>
+                                  </div>
+                                  {userRole === 'admin' && (
+                                    <button 
+                                      onClick={() => handleEliminarRegistro('workers', w.id)} 
+                                      className="text-red-500 hover:text-red-700 p-1 hover:bg-red-50 rounded cursor-pointer"
+                                      title="Dar de baja trabajador"
+                                    >
+                                      🗑️
+                                    </button>
+                                  )}
+                                </div>
                               </div>
                             ))}
                           </div>
@@ -1290,9 +1457,9 @@ const handleSaveGasto = async (e: React.FormEvent) => {
                           />
                         </div>
                         <div className="flex gap-2 shrink-0">
-                          <button onClick={() => setFiltroUbicacionResguardo('todos')} className={`px-4 py-1.5 rounded-full text-xs font-bold border transition-all ${filtroUbicacionResguardo === 'todos' ? 'bg-slate-900 border-slate-900 text-white shadow-sm' : 'bg-white text-slate-600 border-slate-200'}`}>📋 Todos</button>
-                          <button onClick={() => setFiltroUbicacionResguardo('bodega')} className={`px-4 py-1.5 rounded-full text-xs font-bold border transition-all ${filtroUbicacionResguardo === 'bodega' ? 'bg-emerald-50 border-emerald-200 text-emerald-700 shadow-sm' : 'bg-white text-slate-600'}`}>📦 En Bodega</button>
-                          <button onClick={() => setFiltroUbicacionResguardo('obra')} className={`px-4 py-1.5 rounded-full text-xs font-bold border transition-all ${filtroUbicacionResguardo === 'obra' ? 'bg-orange-50 border-orange-200 text-orange-700 shadow-sm' : 'bg-white text-slate-600'}`}>🏗️ En Obra</button>
+                          <button onClick={() => setFiltroUbicacionResguardo('todos')} className={`px-4 py-1.5 rounded-full text-xs font-bold border transition-all cursor-pointer ${filtroUbicacionResguardo === 'todos' ? 'bg-slate-900 border-slate-900 text-white shadow-sm' : 'bg-white text-slate-600 border-slate-200'}`}>📋 Todos</button>
+                          <button onClick={() => setFiltroUbicacionResguardo('bodega')} className={`px-4 py-1.5 rounded-full text-xs font-bold border transition-all cursor-pointer ${filtroUbicacionResguardo === 'bodega' ? 'bg-emerald-50 border-emerald-200 text-emerald-700 shadow-sm' : 'bg-white text-slate-600'}`}>📦 En Bodega</button>
+                          <button onClick={() => setFiltroUbicacionResguardo('obra')} className={`px-4 py-1.5 rounded-full text-xs font-bold border transition-all cursor-pointer ${filtroUbicacionResguardo === 'obra' ? 'bg-orange-50 border-orange-200 text-orange-700 shadow-sm' : 'bg-white text-slate-600'}`}>🏗️ En Obra</button>
                         </div>
                       </div>
 
@@ -1374,12 +1541,11 @@ const handleSaveGasto = async (e: React.FormEvent) => {
         </main>
       </div>
 
-      {/* 🔴 MODAL DE GASTOS CON INTERFAZ ADAPTADA Y ALCANCE PERFECTO */}
+      {/* 🔴 MODAL DE GASTOS */}
       {isExpenseModalOpen && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
           <div className="bg-white rounded-3xl w-full max-w-xl shadow-2xl border border-slate-100 overflow-hidden flex flex-col max-h-[90vh]">
             
-            {/* Cabecera del Modal */}
             <div className="px-6 py-4 bg-slate-50 border-b border-slate-100 flex justify-between items-center shrink-0">
               <h3 className="text-lg font-black text-slate-800">
                 {expenseSubTab === 'generales' && '🧱 Registro Estructural'}
@@ -1387,17 +1553,16 @@ const handleSaveGasto = async (e: React.FormEvent) => {
                 {expenseSubTab === 'maquinaria' && '🚜 Directorio de Maquinaria'}
                 {expenseSubTab === 'destajos' && '🛠️ Nuevo Registro de Destajo'}
               </h3>
-              <button onClick={() => setIsExpenseModalOpen(false)} className="text-slate-400 hover:text-slate-600 transition-colors p-1.5 rounded-lg bg-white shadow-sm border">
+              <button onClick={() => setIsExpenseModalOpen(false)} className="text-slate-400 hover:text-slate-600 transition-colors p-1.5 rounded-lg bg-white shadow-sm border cursor-pointer">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
             </div>
 
-            {/* Sub-Tabs de selección rápida dentro del Modal */}
             <div className="px-6 py-3 border-b bg-white flex gap-2 overflow-x-auto shrink-0">
-              <button type="button" onClick={() => setExpenseSubTab('generales')} className={`px-4 py-1.5 rounded-full text-xs font-bold border transition-all ${expenseSubTab === 'generales' ? 'bg-blue-600 border-blue-600 text-white shadow-sm' : 'bg-slate-50 text-slate-600'}`}>🧱 Materiales</button>
-              <button type="button" onClick={() => setExpenseSubTab('caja_chica')} className={`px-4 py-1.5 rounded-full text-xs font-bold border transition-all ${expenseSubTab === 'caja_chica' ? 'bg-blue-600 border-blue-600 text-white shadow-sm' : 'bg-slate-50 text-slate-600'}`}>💵 Caja Chica</button>
-              <button type="button" onClick={() => setExpenseSubTab('maquinaria')} className={`px-4 py-1.5 rounded-full text-xs font-bold border transition-all ${expenseSubTab === 'maquinaria' ? 'bg-blue-600 border-blue-600 text-white shadow-sm' : 'bg-slate-50 text-slate-600'}`}>🚜 Maquinaria</button>
-              <button type="button" onClick={() => setExpenseSubTab('destajos')} className={`px-4 py-1.5 rounded-full text-xs font-bold border transition-all ${expenseSubTab === 'destajos' ? 'bg-blue-600 border-blue-600 text-white shadow-sm' : 'bg-slate-50 text-slate-600'}`}>🛠️ Destajos</button>
+              <button type="button" onClick={() => setExpenseSubTab('generales')} className={`px-4 py-1.5 rounded-full text-xs font-bold border transition-all cursor-pointer ${expenseSubTab === 'generales' ? 'bg-blue-600 border-blue-600 text-white shadow-sm' : 'bg-slate-50 text-slate-600'}`}>🧱 Materiales</button>
+              <button type="button" onClick={() => setExpenseSubTab('caja_chica')} className={`px-4 py-1.5 rounded-full text-xs font-bold border transition-all cursor-pointer ${expenseSubTab === 'caja_chica' ? 'bg-blue-600 border-blue-600 text-white shadow-sm' : 'bg-slate-50 text-slate-600'}`}>💵 Caja Chica</button>
+              <button type="button" onClick={() => setExpenseSubTab('maquinaria')} className={`px-4 py-1.5 rounded-full text-xs font-bold border transition-all cursor-pointer ${expenseSubTab === 'maquinaria' ? 'bg-blue-600 border-blue-600 text-white shadow-sm' : 'bg-slate-50 text-slate-600'}`}>🚜 Maquinaria</button>
+              <button type="button" onClick={() => setExpenseSubTab('destajos')} className={`px-4 py-1.5 rounded-full text-xs font-bold border transition-all cursor-pointer ${expenseSubTab === 'destajos' ? 'bg-blue-600 border-blue-600 text-white shadow-sm' : 'bg-slate-50 text-slate-600'}`}>🛠️ Destajos</button>
             </div>
             
             <form onSubmit={handleSaveGasto} className="p-6 space-y-5 overflow-y-auto flex-1 bg-slate-50/40">
@@ -1405,10 +1570,10 @@ const handleSaveGasto = async (e: React.FormEvent) => {
               
               <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
                 <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Fecha de Operación</label>
-                <input type="date" required value={fechaGasto} onChange={(e) => setFechaGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-black text-slate-800 font-medium focus:border-blue-500 focus:outline-none bg-slate-50" />
+                <input type="date" required value={fechaGasto} onChange={(e) => setFechaGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-800 font-medium focus:border-blue-500 focus:outline-none bg-slate-50" />
               </div>
 
-              {/* 1. FORMULARIO: GASTOS GENERALES / MATERIALES */}
+              {/* 1. GASTOS GENERALES / MATERIALES */}
               {expenseSubTab === 'generales' && (
                 <div className="space-y-4">
                   <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3">
@@ -1420,7 +1585,7 @@ const handleSaveGasto = async (e: React.FormEvent) => {
                         { id: 'Burócrata', label: '🛡️ Burócrata' },
                         { id: 'Asesoría', label: '👥 Asesoría' }
                       ].map((rubro) => (
-                        <button type="button" key={rubro.id} onClick={() => setRubroClasificacion(rubro.id)} className={`py-2 px-1 text-xs font-bold rounded-xl border transition-all ${rubroClasificacion === rubro.id ? 'bg-amber-500 border-amber-500 text-white shadow-md' : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'}`}>{rubro.label}</button>
+                        <button type="button" key={rubro.id} onClick={() => setRubroClasificacion(rubro.id)} className={`py-2 px-1 text-xs font-bold rounded-xl border transition-all cursor-pointer ${rubroClasificacion === rubro.id ? 'bg-amber-500 border-amber-500 text-white shadow-md' : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'}`}>{rubro.label}</button>
                       ))}
                     </div>
                   </div>
@@ -1429,7 +1594,7 @@ const handleSaveGasto = async (e: React.FormEvent) => {
                     <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider">Estado de Pago</label>
                     <div className="grid grid-cols-3 gap-2">
                       {['Liquidado', 'Abono', 'Por Pagar'].map((estado) => (
-                        <button type="button" key={estado} onClick={() => setEstadoPago(estado)} className={`py-2 text-xs font-bold rounded-xl border transition-all ${estadoPago === estado ? 'bg-emerald-500 border-emerald-500 text-white shadow-md' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>{estado}</button>
+                        <button type="button" key={estado} onClick={() => setEstadoPago(estado)} className={`py-2 text-xs font-bold rounded-xl border transition-all cursor-pointer ${estadoPago === estado ? 'bg-emerald-500 border-emerald-500 text-white shadow-md' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>{estado}</button>
                       ))}
                     </div>
                   </div>
@@ -1473,12 +1638,12 @@ const handleSaveGasto = async (e: React.FormEvent) => {
                 </div>
               )}
 
-              {/* 2. FORMULARIO: LIBRO MAYOR DE CAJA / CAJA CHICA */}
+              {/* 2. CAJA CHICA */}
               {expenseSubTab === 'caja_chica' && (
                 <div className="space-y-4">
                   <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-sm flex p-1.5 bg-slate-100">
-                    <button type="button" onClick={() => setSubTipoCajaChica('Inversion')} className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${subTipoCajaChica === 'Inversion' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'}`}>🏦 Registrar Inversión</button>
-                    <button type="button" onClick={() => setSubTipoCajaChica('Gasto')} className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${subTipoCajaChica === 'Gasto' ? 'bg-red-500 text-white shadow-sm' : 'text-slate-500'}`}>📥 Registrar Gasto</button>
+                    <button type="button" onClick={() => setSubTipoCajaChica('Inversion')} className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer ${subTipoCajaChica === 'Inversion' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'}`}>🏦 Registrar Inversión</button>
+                    <button type="button" onClick={() => setSubTipoCajaChica('Gasto')} className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer ${subTipoCajaChica === 'Gasto' ? 'bg-red-500 text-white shadow-sm' : 'text-slate-500'}`}>📥 Registrar Gasto</button>
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
@@ -1503,7 +1668,6 @@ const handleSaveGasto = async (e: React.FormEvent) => {
                         <input type="number" required placeholder="P.U ($)" value={precioUnitarioGasto} onChange={(e) => setPrecioUnitarioGasto(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-medium bg-white" />
                       </div>
                     </div>
-                    <button type="button" className="w-full py-2 border border-dashed border-blue-300 text-blue-600 text-xs font-bold rounded-xl bg-blue-50/40 hover:bg-blue-50">+ Agregar otro artículo</button>
                   </div>
 
                   <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
@@ -1513,7 +1677,7 @@ const handleSaveGasto = async (e: React.FormEvent) => {
                 </div>
               )}
 
-              {/* 3. FORMULARIO: DIRECTORIO DE MAQUINARIA */}
+              {/* 3. MAQUINARIA */}
               {expenseSubTab === 'maquinaria' && (
                 <div className="space-y-4">
                   <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
@@ -1530,7 +1694,7 @@ const handleSaveGasto = async (e: React.FormEvent) => {
                     <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider">Corte de Facturación / Modalidad</label>
                     <div className="grid grid-cols-3 gap-2">
                       {['Por Día', 'Por Semana', 'Por Mes'].map((mod) => (
-                        <button type="button" key={mod} onClick={() => setModalidadFacturacion(mod)} className={`py-2 text-xs font-bold rounded-xl border transition-all ${modalidadFacturacion === mod ? 'bg-blue-600 border-blue-600 text-white shadow-md' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>{mod}</button>
+                        <button type="button" key={mod} onClick={() => setModalidadFacturacion(mod)} className={`py-2 text-xs font-bold rounded-xl border transition-all cursor-pointer ${modalidadFacturacion === mod ? 'bg-blue-600 border-blue-600 text-white shadow-md' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>{mod}</button>
                       ))}
                     </div>
                   </div>
@@ -1548,14 +1712,9 @@ const handleSaveGasto = async (e: React.FormEvent) => {
                 </div>
               )}
 
-              {/* 4. FORMULARIO: DESTAJOS */}
+              {/* 4. DESTAJOS */}
               {expenseSubTab === 'destajos' && (
                 <div className="space-y-4">
-                  <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
-                    <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Semana de Registro</label>
-                    <input type="text" disabled placeholder="Periodo Semanal Automático" className="w-full rounded-xl border px-3 py-2 text-black font-medium bg-slate-100 text-slate-500 cursor-not-allowed" />
-                  </div>
-
                   <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
                     <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Concepto / Actividad</label>
                     <input type="text" required placeholder="Ej. Cemento Cruz Azul 50kg" value={conceptoGasto} onChange={(e) => setConceptoGasto(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-black font-medium focus:outline-none bg-slate-50" />
@@ -1582,7 +1741,7 @@ const handleSaveGasto = async (e: React.FormEvent) => {
                     <input type="text" placeholder="Nombre del responsable..." value={encargadoRecibeDestajo} onChange={(e) => setEncargadoRecibeDestajo(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-black bg-slate-50" />
                     <div className="flex gap-1.5 flex-wrap pt-1">
                       {['Luis', 'Angel'].map((name) => (
-                        <button type="button" key={`recibe-${name}`} onClick={() => setEncargadoRecibeDestajo(name)} className={`px-3 py-1 rounded-lg text-xs font-bold border transition-all ${encargadoRecibeDestajo === name ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-white text-slate-500'}`}>{name}</button>
+                        <button type="button" key={`recibe-${name}`} onClick={() => setEncargadoRecibeDestajo(name)} className={`px-3 py-1 rounded-lg text-xs font-bold border transition-all cursor-pointer ${encargadoRecibeDestajo === name ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-white text-slate-500'}`}>{name}</button>
                       ))}
                     </div>
                   </div>
@@ -1592,14 +1751,13 @@ const handleSaveGasto = async (e: React.FormEvent) => {
                     <input type="text" placeholder="Quién pide el material..." value={solicitadoPorDestajo} onChange={(e) => setSolicitadoPorDestajo(e.target.value)} className="w-full rounded-xl border px-3 py-2 text-black bg-slate-50" />
                     <div className="flex gap-1.5 flex-wrap pt-1">
                       {['Luis', 'Angel'].map((name) => (
-                        <button type="button" key={`solicita-${name}`} onClick={() => setSolicitadoPorDestajo(name)} className={`px-3 py-1 rounded-lg text-xs font-bold border transition-all ${solicitadoPorDestajo === name ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-white text-slate-500'}`}>{name}</button>
+                        <button type="button" key={`solicita-${name}`} onClick={() => setSolicitadoPorDestajo(name)} className={`px-3 py-1 rounded-lg text-xs font-bold border transition-all cursor-pointer ${solicitadoPorDestajo === name ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-white text-slate-500'}`}>{name}</button>
                       ))}
                     </div>
                   </div>
                 </div>
               )}
 
-              {/* Bloque Consolidado Inferior del Importe */}
               <div className="bg-slate-900 text-white rounded-2xl p-4 mt-4 shadow-md flex justify-between items-center shrink-0">
                 <div className="flex flex-col">
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Importe Total Calculado</span>
@@ -1612,23 +1770,22 @@ const handleSaveGasto = async (e: React.FormEvent) => {
                 </div>
               </div>
 
-              {/* Botones de Acción */}
               <div className="pt-4 flex justify-end gap-3 border-t border-slate-100 mt-6 shrink-0">
-                <button type="button" onClick={() => setIsExpenseModalOpen(false)} className="px-4 py-2 text-sm font-bold text-slate-500 hover:bg-slate-100 rounded-xl transition-all">Cancelar</button>
-                <button type="submit" disabled={loadingExpenseForm || !montoGasto} className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold px-6 py-2 rounded-xl shadow-lg shadow-blue-600/20 transition-all disabled:opacity-50">Guardar Registro</button>
+                <button type="button" onClick={() => setIsExpenseModalOpen(false)} className="px-4 py-2 text-sm font-bold text-slate-500 hover:bg-slate-100 rounded-xl transition-all cursor-pointer">Cancelar</button>
+                <button type="submit" disabled={loadingExpenseForm || !montoGasto} className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold px-6 py-2 rounded-xl shadow-lg shadow-blue-600/20 transition-all disabled:opacity-50 cursor-pointer">Guardar Registro</button>
               </div>
             </form>
           </div>
         </div>
       )}
 
-{/* 🟢 MODAL DE PROYECTOS ACTUALIZADO CON FORMULARIO COMPLETO */}
+      {/* 🟢 MODAL DE ALTA DE OBRA */}
       {isProjectModalOpen && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-3xl w-full max-w-md p-6 shadow-2xl border border-slate-100 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-lg font-black text-slate-800">Alta de Nueva Obra</h3>
-              <button type="button" onClick={() => setIsProjectModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 bg-slate-50 rounded-lg border">
+              <button type="button" onClick={() => setIsProjectModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 bg-slate-50 rounded-lg border cursor-pointer">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
                 </svg>
@@ -1732,14 +1889,14 @@ const handleSaveGasto = async (e: React.FormEvent) => {
                 <button 
                   type="button" 
                   onClick={() => setIsProjectModalOpen(false)} 
-                  className="px-4 py-2 text-sm font-bold text-slate-500 hover:bg-slate-100 rounded-xl transition-all"
+                  className="px-4 py-2 text-sm font-bold text-slate-500 hover:bg-slate-100 rounded-xl transition-all cursor-pointer"
                 >
                   Cancelar
                 </button>
                 <button 
                   type="submit" 
-                  disabled={loadingProjectForm}
-                  className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold px-6 py-2 rounded-xl shadow-lg shadow-blue-600/20 transition-all disabled:opacity-50"
+                  disabled={loadingProjectForm} 
+                  className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold px-6 py-2 rounded-xl shadow-lg shadow-blue-600/20 transition-all disabled:opacity-50 cursor-pointer"
                 >
                   {loadingProjectForm ? 'Creando...' : 'Crear Obra'}
                 </button>
@@ -1749,12 +1906,37 @@ const handleSaveGasto = async (e: React.FormEvent) => {
         </div>
       )}
 
+      {/* 👷 MODAL DE ALTA DE TRABAJADOR */}
       {isWorkerModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4"><div className="bg-white rounded-2xl w-full max-w-md p-6"><h3 className="text-base font-bold text-slate-900 mb-4">Dar de Alta Trabajador</h3><form onSubmit={handleCreateWorker} className="space-y-4"><div><label className="text-xs font-bold block mb-1">Nombre Completo</label><input type="text" required value={newWorkerName} onChange={(e) => setNewWorkerName(e.target.value)} className="w-full border rounded-xl px-3 py-2 text-sm" /></div><div className="flex justify-end gap-2"><button type="button" onClick={() => setIsWorkerModalOpen(false)} className="px-4 py-2 text-xs font-bold text-slate-500">Cerrar</button><button type="submit" className="bg-blue-600 text-white text-xs font-bold px-4 py-2 rounded-xl">Contratar</button></div></form></div></div>
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md p-6">
+            <h3 className="text-base font-bold text-slate-900 mb-4">Dar de Alta Trabajador</h3>
+            <form onSubmit={handleCreateWorker} className="space-y-4">
+              <div>
+                <label className="text-xs font-bold block mb-1">Nombre Completo</label>
+                <input type="text" required value={newWorkerName} onChange={(e) => setNewWorkerName(e.target.value)} className="w-full border rounded-xl px-3 py-2 text-sm" />
+              </div>
+              <div className="flex justify-end gap-2">
+                <button type="button" onClick={() => setIsWorkerModalOpen(false)} className="px-4 py-2 text-xs font-bold text-slate-500 cursor-pointer">Cerrar</button>
+                <button type="submit" disabled={loadingWorkerForm} className="bg-blue-600 text-white text-xs font-bold px-4 py-2 rounded-xl cursor-pointer">{loadingWorkerForm ? 'Guardando...' : 'Contratar'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
 
+      {/* ⚠️ MODAL DE CONFIRMACIÓN DE FIN DE OBRA */}
       {isFinishModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"><div className="bg-white rounded-2xl w-full max-w-sm p-6 text-center"><h3>¿Cerrar Obra Histórica?</h3><div className="flex justify-end gap-2 mt-4"><button onClick={() => setIsFinishModalOpen(false)}>No</button><button onClick={handleFinalizarObra} className="bg-red-600 text-white px-4 py-2 rounded-xl">Sí, Finalizar</button></div></div></div>
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-sm p-6 text-center">
+            <h3 className="text-base font-bold text-slate-900 mb-2">¿Cerrar Obra Histórica?</h3>
+            <p className="text-xs text-slate-500 mb-6">Esta acción generará el acta PDF de finiquito y archivará la obra.</p>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setIsFinishModalOpen(false)} className="px-4 py-2 text-xs font-bold text-slate-500 cursor-pointer">No</button>
+              <button onClick={handleFinalizarObra} className="bg-red-600 text-white px-4 py-2 rounded-xl text-xs font-bold cursor-pointer">Sí, Finalizar</button>
+            </div>
+          </div>
+        </div>
       )}
 
     </div>
