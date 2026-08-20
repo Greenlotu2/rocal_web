@@ -550,7 +550,7 @@ export default function DashboardPage() {
           name: newProjectName, 
           client_name: newProjectCliente, 
           contract_number: newProjectNumContrato,
-          ubicacion: newProjectUbicacion,
+          location: newProjectUbicacion,
           start_date: newProjectFechaInicio || null, 
           end_date: newProjectFechaFin || null
         } as any
